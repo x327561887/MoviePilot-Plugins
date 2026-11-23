@@ -110,8 +110,9 @@
             <div class="tw-select-wrap" @click.stop>
               <v-checkbox-btn
                 :model-value="isSelected(group.key)"
-                color="primary"
+                color="success"
                 density="compact"
+                class="tw-select-checkbox"
                 @update:model-value="toggleSelect(group.key)"
               />
             </div>
@@ -332,7 +333,7 @@ const state = reactive({
   confirmText: '',
   busy: false,
   config: {
-    max_batch: 20,
+    max_batch: 100,
     default_delete_record: true,
     default_delete_src: false,
     default_delete_dest: false,
@@ -623,11 +624,23 @@ onMounted(loadWall)
 }
 .tw-select-wrap {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 4px;
+  right: 4px;
   z-index: 3;
-  background: rgba(0, 0, 0, 0.35);
+  background: transparent;
   border-radius: 4px;
+}
+/* 未选中：白色描边的空心框，在海报上清晰可见 */
+.tw-select-checkbox :deep(.v-selection-control__wrapper) {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-radius: 4px;
+}
+.tw-select-checkbox :deep(.v-input__control) {
+  background: transparent;
+}
+/* 选中：绿色实心框 + 白色对勾 */
+.tw-select-checkbox :deep(.v-selection-control--dirty .v-selection-control__input) {
+  color: #2e7d32 !important;
 }
 .tw-overlay {
   position: absolute;
