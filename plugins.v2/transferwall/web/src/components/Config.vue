@@ -108,7 +108,7 @@ const defaults = {
   nav_title: '整理海报墙',
   nav_icon: 'mdi-view-gallery',
   max_records: 1200,
-  max_batch: 20,
+  max_batch: 100,
   default_delete_record: true,
   default_delete_src: false,
   default_delete_dest: false,
