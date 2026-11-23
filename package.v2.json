@@ -1,19 +1,31 @@
 {
-  "name": "MoviePilot-Plugins-V2",
-  "version": "1.0.0",
-  "description": "MoviePilot V2 自定义插件仓库",
-  "author": "x327561887",
-  "license": "MIT",
-  "plugins": [
-    {
-      "id": "HostsUrl",
-      "name": "远程Hosts",
-      "version": "1.0.0",
-      "description": "定时从远程URL拉取hosts并写入系统，支持手动更新",
-      "icon": "https://raw.githubusercontent.com/x327561887/moviepilot-plugins/main/plugins/v2/HostsUrl/hosts.png",
-      "path": "plugins/v2/HostsUrl",
-      "v2": true,
-      "level": 1
+  "TransferWall": {
+    "name": "整理海报墙",
+    "description": "在主界面整理分组显示转移记录海报墙，支持删除整理记录、源文件和媒体库文件。",
+    "labels": "整理,海报墙,文件清理",
+    "version": "1.0.0",
+    "icon": "https://raw.githubusercontent.com/x327561887/MoviePilot-Plugins/main/icons/transferwall.svg",
+    "author": "WorkBuddy",
+    "level": 1,
+    "v3": false,
+    "release": false,
+    "system_version": ">=2.12.0,<3",
+    "history": {
+      "v1.0.0": "初始版本：整理记录聚合海报墙，支持记录/源文件/媒体库文件删除"
     }
-  ]
+  },
+  "HostsUrl": {
+    "name": "远程Hosts",
+    "description": "定时从远程URL拉取hosts并写入系统，支持手动更新。",
+    "labels": "工具,网络",
+    "version": "1.0.0",
+    "icon": "https://raw.githubusercontent.com/x327561887/MoviePilot-Plugins/main/plugins/v2/HostsUrl/hosts.png",
+    "author": "x327561887",
+    "level": 1,
+    "v3": false,
+    "release": false,
+    "history": {
+      "v1.0.0": "初始版本"
+    }
+  }
 }

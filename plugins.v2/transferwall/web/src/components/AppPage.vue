@@ -1,0 +1,744 @@
+<template>
+  <div class="tw-page">
+    <v-card variant="outlined" class="tw-panel">
+      <v-card-text>
+        <div class="tw-heading">
+          <div>
+            <div class="text-h6">整理海报墙</div>
+            <div class="text-caption text-medium-emphasis">
+              按媒体聚合整理记录 · 可删除记录、源文件与媒体库文件
+            </div>
+          </div>
+          <v-btn
+            icon="mdi-refresh"
+            size="small"
+            variant="text"
+            :loading="state.loading"
+            title="刷新"
+            @click="loadWall"
+          />
+        </div>
+
+        <div class="tw-toolbar">
+          <v-text-field
+            v-model="state.keyword"
+            density="compact"
+            variant="outlined"
+            hide-details
+            prepend-inner-icon="mdi-magnify"
+            label="搜索标题或路径"
+            class="tw-search"
+            @keyup.enter="reload"
+          />
+          <v-select
+            v-model="state.status"
+            :items="statusOptions"
+            density="compact"
+            variant="outlined"
+            hide-details
+            label="状态"
+            class="tw-filter"
+            @update:model-value="reload"
+          />
+          <v-select
+            v-model="state.mediaType"
+            :items="typeOptions"
+            density="compact"
+            variant="outlined"
+            hide-details
+            label="类型"
+            class="tw-filter"
+            @update:model-value="reload"
+          />
+          <v-btn size="small" variant="tonal" @click="selectCurrentPage">
+            {{ allCurrentSelected ? '取消本页' : '全选本页' }}
+          </v-btn>
+          <v-btn
+            size="small"
+            color="error"
+            variant="tonal"
+            :disabled="!state.selected.length"
+            prepend-icon="mdi-delete-outline"
+            @click="bulkDelete"
+          >
+            批量删除（{{ state.selected.length }}）
+          </v-btn>
+        </div>
+
+        <div class="tw-stats">
+          <v-chip size="small" variant="tonal">媒体 {{ state.total_groups }}</v-chip>
+          <v-chip size="small" variant="tonal">记录 {{ state.total_records }}</v-chip>
+          <v-chip v-if="state.truncated" size="small" color="warning" variant="tonal">
+            仅显示最近记录
+          </v-chip>
+        </div>
+
+        <v-alert v-if="state.error || state.localMessage" type="error" variant="tonal" class="tw-alert">
+          {{ state.error || state.localMessage }}
+        </v-alert>
+      </v-card-text>
+    </v-card>
+
+    <div v-if="state.loading && !state.groups.length" class="tw-loading">
+      <v-progress-circular indeterminate color="primary" />
+    </div>
+
+    <div v-else-if="!state.groups.length" class="tw-empty">
+      <v-icon size="48">mdi-image-off-outline</v-icon>
+      <div class="mt-2">暂无整理记录</div>
+    </div>
+
+    <v-row v-else class="tw-grid">
+      <v-col
+        v-for="group in state.groups"
+        :key="group.key"
+        cols="6"
+        sm="4"
+        md="3"
+        lg="2"
+        xl="2"
+        class="tw-cell"
+      >
+        <v-card class="tw-media-card" variant="outlined" @click="openDetail(group)">
+          <div class="tw-poster-wrap">
+            <v-img v-if="group.poster" :src="group.poster" cover class="tw-poster" />
+            <div v-else class="tw-poster tw-no-poster">
+              <v-icon size="40">mdi-image-off-outline</v-icon>
+              <span class="tw-no-poster-title">{{ group.title }}</span>
+            </div>
+
+            <div class="tw-select-wrap" @click.stop>
+              <v-checkbox-btn
+                :model-value="isSelected(group.key)"
+                color="primary"
+                density="compact"
+                @update:model-value="toggleSelect(group.key)"
+              />
+            </div>
+
+            <div class="tw-overlay">
+              <div class="tw-title" :title="group.title">{{ group.title }}</div>
+              <div class="tw-meta">
+                <span v-if="group.year">{{ group.year }}</span>
+                <span v-if="group.type">{{ group.type }}</span>
+                <span>{{ group.record_count }} 条</span>
+              </div>
+              <div class="tw-badges">
+                <v-chip size="x-small" color="success" variant="tonal">
+                  {{ group.success_count }} 成功
+                </v-chip>
+                <v-chip v-if="group.fail_count" size="x-small" color="error" variant="tonal">
+                  {{ group.fail_count }} 失败
+                </v-chip>
+                <v-chip v-if="group.src_count" size="x-small" variant="tonal" title="源文件数量">
+                  <v-icon start size="x-small">mdi-download</v-icon>{{ group.src_count }}
+                </v-chip>
+                <v-chip v-if="group.dest_count" size="x-small" variant="tonal" title="媒体库文件数量">
+                  <v-icon start size="x-small">mdi-folder-play</v-icon>{{ group.dest_count }}
+                </v-chip>
+              </div>
+            </div>
+          </div>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <div v-if="state.total_groups > state.page_size" class="tw-pager">
+      <v-btn size="small" variant="text" :disabled="state.page <= 1" @click="goPage(state.page - 1)">
+        上一页
+      </v-btn>
+      <span class="text-caption">{{ state.page }} / {{ Math.max(1, Math.ceil(state.total_groups / state.page_size)) }}</span>
+      <v-btn
+        size="small"
+        variant="text"
+        :disabled="state.page * state.page_size >= state.total_groups"
+        @click="goPage(state.page + 1)"
+      >
+        下一页
+      </v-btn>
+    </div>
+
+    <!-- 媒体详情 -->
+    <v-dialog v-model="state.detailDialog" max-width="960" scrollable>
+      <v-card>
+        <v-card-item>
+          <v-card-title>{{ state.detail?.title || '整理详情' }}</v-card-title>
+          <template #append>
+            <v-btn icon="mdi-close" size="small" variant="text" @click="state.detailDialog = false" />
+          </template>
+        </v-card-item>
+        <v-card-text class="tw-detail-body">
+          <div class="tw-detail-head">
+            <v-img
+              v-if="state.detail?.poster"
+              :src="state.detail.poster"
+              cover
+              width="100"
+              height="150"
+              class="tw-detail-poster"
+            />
+            <div class="tw-detail-info">
+              <div class="text-subtitle-1">{{ state.detail?.year || '未知年份' }} · {{ state.detail?.type || '未分类' }}</div>
+              <div class="text-caption text-medium-emphasis">
+                {{ state.detail?.record_count || 0 }} 条整理记录
+                <span v-if="state.detail?.seasons"> · 季：{{ state.detail.seasons }}</span>
+                <span v-if="state.detail?.records_truncated"> · 仅显示最近 200 条</span>
+              </div>
+              <div class="tw-detail-actions">
+                <v-btn size="x-small" variant="tonal" @click="openGroupDelete('仅删除本媒体记录', { record: true, src: false, dest: false })">
+                  删除全部记录
+                </v-btn>
+                <v-btn size="x-small" color="warning" variant="tonal" @click="openGroupDelete('删除本媒体源文件', { record: false, src: true, dest: false })">
+                  删除源文件
+                </v-btn>
+                <v-btn size="x-small" color="error" variant="tonal" @click="openGroupDelete('删除本媒体库文件', { record: false, src: false, dest: true })">
+                  删除媒体库文件
+                </v-btn>
+                <v-btn size="x-small" color="error" variant="flat" @click="openGroupDelete('删除本媒体记录、源文件与媒体库文件', { record: true, src: true, dest: true })">
+                  全部删除
+                </v-btn>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-for="record in state.detail?.records || []"
+            :key="record.id"
+            class="tw-record"
+          >
+            <div class="tw-record-top">
+              <v-chip size="x-small" :color="record.status ? 'success' : 'error'" variant="tonal">
+                {{ record.status ? '成功' : '失败' }}
+              </v-chip>
+              <span class="text-caption">{{ record.date || ' unknown date' }}</span>
+              <span v-if="record.seasons" class="text-caption">S{{ record.seasons }}</span>
+              <span v-if="record.episodes" class="text-caption">E{{ record.episodes }}</span>
+              <v-spacer />
+              <v-btn size="x-small" variant="text" @click="openDelete([record.id], '删除单条整理记录', { record: true, src: false, dest: false })">
+                删记录
+              </v-btn>
+              <v-btn size="x-small" color="warning" variant="text" @click="openDelete([record.id], '删除单条源文件', { record: false, src: true, dest: false })">
+                删源
+              </v-btn>
+              <v-btn size="x-small" color="error" variant="text" @click="openDelete([record.id], '删除单条媒体库文件', { record: false, src: false, dest: true })">
+                删库
+              </v-btn>
+              <v-btn size="x-small" color="error" variant="tonal" @click="openDelete([record.id], '删除单条记录及全部关联文件', { record: true, src: true, dest: true })">
+                全删
+              </v-btn>
+            </div>
+            <div class="tw-path"><span class="tw-path-label">源：</span>{{ record.src || '—' }}</div>
+            <div class="tw-path"><span class="tw-path-label">库：</span>{{ record.dest || '—' }}</div>
+            <div v-if="!record.status && record.errmsg" class="text-caption text-error">
+              {{ record.errmsg }}
+            </div>
+          </div>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+
+    <!-- 删除确认 -->
+    <v-dialog v-model="state.confirmDialog" max-width="720" persistent>
+      <v-card>
+        <v-card-item>
+          <v-card-title class="tw-confirm-title">确认删除</v-card-title>
+        </v-card-item>
+        <v-card-text>
+          <v-alert type="warning" variant="tonal" class="tw-alert">
+            文件删除不可恢复，也不会进入回收站。请确认已停止相关下载/做种任务。
+          </v-alert>
+          <div class="tw-confirm-summary">
+            {{ state.confirmLabel }} · 共 {{ state.confirmIds.length }} 条记录
+            <span v-if="state.confirmIds.length > (state.config.max_batch || 20)">
+              （将分 {{ Math.ceil(state.confirmIds.length / (state.config.max_batch || 20)) }} 批执行）
+            </span>
+          </div>
+          <div class="tw-path-list">
+            <div v-for="record in state.confirmRecords.slice(0, 8)" :key="record.id" class="tw-path-list-item">
+              <div class="text-caption font-weight-medium">#{{ record.id }} {{ record.title || '' }}</div>
+              <div class="tw-path">源：{{ record.src || '—' }}</div>
+              <div class="tw-path">库：{{ record.dest || '—' }}</div>
+            </div>
+            <div v-if="state.confirmRecords.length > 8" class="text-caption text-medium-emphasis">
+              另有 {{ state.confirmRecords.length - 8 }} 条未显示
+            </div>
+          </div>
+          <v-checkbox v-model="state.flags.record" label="删除整理记录" density="compact" hide-details />
+          <v-checkbox v-model="state.flags.src" label="删除源文件（下载目录）" density="compact" hide-details color="warning" />
+          <v-checkbox v-model="state.flags.dest" label="删除媒体库文件" density="compact" hide-details color="error" />
+          <v-text-field
+            v-if="needsConfirmText"
+            v-model="state.confirmText"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="tw-confirm-input"
+            label="请输入「删除」以确认文件删除"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" :disabled="state.busy" @click="state.confirmDialog = false">取消</v-btn>
+          <v-btn color="error" variant="flat" :loading="state.busy" @click="executeDelete">确认删除</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+  </div>
+</template>
+
+<script setup>
+import { computed, inject, onMounted, reactive } from 'vue'
+
+const props = defineProps({
+  api: { type: Object, default: () => ({}) },
+  navKey: { type: String, default: 'main' },
+  pluginId: { type: String, default: '' },
+})
+
+const toast = inject('moviepilot:toast', null)
+
+const statusOptions = [
+  { title: '全部', value: 'all' },
+  { title: '成功', value: 'success' },
+  { title: '失败', value: 'fail' },
+]
+const typeOptions = [
+  { title: '全部类型', value: 'all' },
+  { title: '电影', value: 'movie' },
+  { title: '电视剧', value: 'tv' },
+]
+
+const state = reactive({
+  groups: [],
+  page: 1,
+  page_size: 24,
+  total_groups: 0,
+  total_records: 0,
+  truncated: false,
+  keyword: '',
+  status: 'all',
+  mediaType: 'all',
+  loading: false,
+  error: '',
+  localMessage: '',
+  selected: [],
+  detail: null,
+  detailDialog: false,
+  confirmDialog: false,
+  confirmLabel: '',
+  confirmIds: [],
+  confirmRecords: [],
+  flags: { record: true, src: false, dest: false },
+  confirmText: '',
+  busy: false,
+  config: {
+    max_batch: 20,
+    default_delete_record: true,
+    default_delete_src: false,
+    default_delete_dest: false,
+  },
+})
+
+const apiPrefix = computed(() => `plugin/${props.pluginId || 'TransferWall'}`)
+const needsConfirmText = computed(() => Boolean(state.flags.src || state.flags.dest))
+const currentKeys = computed(() => state.groups.map((group) => group.key))
+const allCurrentSelected = computed(
+  () => currentKeys.value.length > 0 && currentKeys.value.every((key) => state.selected.includes(key))
+)
+
+function notify(type, message) {
+  const fn = toast && typeof toast[type] === 'function' ? toast[type] : null
+  if (fn) {
+    fn(message)
+    return
+  }
+  state.localMessage = message
+  window.setTimeout(() => {
+    if (state.localMessage === message) state.localMessage = ''
+  }, 6000)
+}
+
+function unwrap(response) {
+  if (!response || typeof response !== 'object') return response
+  if ('success' in response && 'data' in response) {
+    if (!response.success) throw new Error(response.message || '请求失败')
+    return response.data
+  }
+  return response
+}
+
+async function callApi(path, method = 'get', payload) {
+  const api = props.api || {}
+  if (method === 'get') {
+    if (typeof api.get === 'function') return unwrap(await api.get(path, payload))
+    if (typeof api.request === 'function') {
+      return unwrap(await api.request({ url: path, method: 'get', params: payload }))
+    }
+  } else {
+    if (typeof api.post === 'function') return unwrap(await api.post(path, payload))
+    if (typeof api.request === 'function') {
+      return unwrap(await api.request({ url: path, method: 'post', data: payload }))
+    }
+  }
+  throw new Error('主应用未注入 API 客户端，请确认插件已启用')
+}
+
+async function loadWall() {
+  state.loading = true
+  state.error = ''
+  try {
+    const params = new URLSearchParams()
+    params.set('page', String(state.page))
+    params.set('page_size', String(state.page_size))
+    params.set('status', state.status)
+    params.set('media_type', state.mediaType)
+    if (state.keyword) params.set('keyword', state.keyword)
+    const data = await callApi(`${apiPrefix.value}/wall?${params.toString()}`)
+    state.groups = data?.groups || []
+    state.total_groups = Number(data?.total_groups || 0)
+    state.total_records = Number(data?.total_records || 0)
+    state.truncated = Boolean(data?.truncated)
+    if (data?.config) Object.assign(state.config, data.config)
+  } catch (err) {
+    state.error = err?.message || String(err)
+  } finally {
+    state.loading = false
+  }
+}
+
+function reload() {
+  state.page = 1
+  state.selected = []
+  loadWall()
+}
+
+function goPage(page) {
+  state.page = page
+  state.selected = []
+  loadWall()
+}
+
+function isSelected(key) {
+  return state.selected.includes(key)
+}
+
+function toggleSelect(key) {
+  const index = state.selected.indexOf(key)
+  if (index >= 0) state.selected.splice(index, 1)
+  else state.selected.push(key)
+}
+
+function selectCurrentPage() {
+  if (allCurrentSelected.value) {
+    state.selected = state.selected.filter((key) => !currentKeys.value.includes(key))
+    return
+  }
+  currentKeys.value.forEach((key) => {
+    if (!state.selected.includes(key)) state.selected.push(key)
+  })
+}
+
+function openDetail(group) {
+  state.detail = group
+  state.detailDialog = true
+}
+
+function recordsOfGroups(keys) {
+  const records = []
+  const wanted = new Set(keys)
+  state.groups.forEach((group) => {
+    if (!wanted.has(group.key)) return
+    ;(group.records || []).forEach((record) => records.push(record))
+  })
+  return records
+}
+
+function openDelete(ids, label, preset) {
+  const wanted = new Set((ids || []).map(Number))
+  const records = []
+  state.groups.forEach((group) => {
+    ;(group.records || []).forEach((record) => {
+      if (wanted.has(Number(record.id))) records.push(record)
+    })
+  })
+  if (state.detail) {
+    ;(state.detail.records || []).forEach((record) => {
+      if (wanted.has(Number(record.id)) && !records.some((item) => item.id === record.id)) {
+        records.push(record)
+      }
+    })
+  }
+  if (!records.length) {
+    notify('warning', '未找到对应的整理记录，请刷新后重试')
+    return
+  }
+  state.confirmIds = [...wanted]
+  state.confirmRecords = records
+  state.confirmLabel = label
+  state.flags = {
+    record: preset?.record ?? state.config.default_delete_record,
+    src: preset?.src ?? state.config.default_delete_src,
+    dest: preset?.dest ?? state.config.default_delete_dest,
+  }
+  state.confirmText = ''
+  state.confirmDialog = true
+}
+
+function openGroupDelete(label, preset) {
+  if (!state.detail) return
+  const ids = (state.detail.records || []).map((record) => record.id).filter(Boolean)
+  openDelete(ids, label, preset)
+}
+
+function bulkDelete() {
+  const records = recordsOfGroups(state.selected)
+  if (!records.length) {
+    notify('warning', '所选媒体没有可删除的记录')
+    return
+  }
+  const ids = records.map((record) => record.id).filter(Boolean)
+  openDelete(ids, `批量删除 ${state.selected.length} 部媒体`, {
+    record: state.config.default_delete_record,
+    src: state.config.default_delete_src,
+    dest: state.config.default_delete_dest,
+  })
+}
+
+async function executeDelete() {
+  if (needsConfirmText.value && state.confirmText.trim() !== '删除') {
+    notify('warning', '请输入「删除」以确认文件删除')
+    return
+  }
+  state.busy = true
+  const maxBatch = Math.max(1, Number(state.config.max_batch || 20))
+  const ids = [...state.confirmIds]
+  let success = 0
+  let failed = 0
+  const failures = []
+  try {
+    for (let index = 0; index < ids.length; index += maxBatch) {
+      const chunk = ids.slice(index, index + maxBatch)
+      const result = await callApi(`${apiPrefix.value}/delete`, 'post', {
+        ids: chunk,
+        delete_record: Boolean(state.flags.record),
+        delete_src: Boolean(state.flags.src),
+        delete_dest: Boolean(state.flags.dest),
+        confirm: '删除',
+      })
+      success += Number(result?.success_count || 0)
+      failed += Number(result?.failed_count || 0)
+      ;(result?.results || []).forEach((item) => {
+        if (item && !item.ok && item.message) failures.push(`#${item.id} ${item.message}`)
+      })
+    }
+    state.confirmDialog = false
+    state.detailDialog = false
+    state.selected = []
+    if (failed) {
+      notify('warning', `成功 ${success} 条，失败 ${failed} 条：${failures.slice(0, 3).join('；')}`)
+    } else {
+      notify('success', `已处理 ${success} 条记录`)
+    }
+    await loadWall()
+  } catch (err) {
+    notify('error', err?.message || String(err))
+  } finally {
+    state.busy = false
+  }
+}
+
+onMounted(loadWall)
+</script>
+
+<style scoped>
+.tw-page {
+  padding: 12px;
+}
+.tw-panel {
+  margin-bottom: 12px;
+}
+.tw-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tw-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.tw-search {
+  min-width: 220px;
+  flex: 1 1 240px;
+}
+.tw-filter {
+  min-width: 120px;
+  max-width: 180px;
+}
+.tw-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.tw-alert {
+  margin-top: 12px;
+}
+.tw-grid {
+  margin-top: 0;
+}
+.tw-cell {
+  padding: 6px !important;
+}
+.tw-media-card {
+  cursor: pointer;
+  overflow: hidden;
+}
+.tw-poster-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background: rgba(127, 127, 127, 0.12);
+}
+.tw-poster {
+  width: 100%;
+  height: 100%;
+}
+.tw-no-poster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  text-align: center;
+}
+.tw-no-poster-title {
+  font-size: 0.85rem;
+  line-height: 1.2;
+  word-break: break-all;
+}
+.tw-select-wrap {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 3;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+}
+.tw-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  padding: 24px 8px 8px;
+  color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0));
+}
+.tw-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tw-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  opacity: 0.9;
+}
+.tw-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.tw-loading,
+.tw-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  gap: 8px;
+}
+.tw-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.tw-detail-body {
+  padding-top: 4px;
+}
+.tw-detail-head {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.tw-detail-poster {
+  flex: 0 0 auto;
+  border-radius: 6px;
+}
+.tw-detail-info {
+  flex: 1 1 auto;
+}
+.tw-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.tw-record {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 6px;
+}
+.tw-record-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.tw-path {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.tw-path-label {
+  font-weight: 600;
+}
+.tw-confirm-title {
+  color: rgb(var(--v-theme-error));
+}
+.tw-confirm-summary {
+  margin: 8px 0 12px;
+  font-weight: 600;
+}
+.tw-path-list {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 6px;
+}
+.tw-path-list-item {
+  margin-bottom: 8px;
+}
+.tw-confirm-input {
+  margin-top: 12px;
+}
+</style>
