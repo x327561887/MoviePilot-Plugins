@@ -108,13 +108,15 @@
             </div>
 
             <div class="tw-select-wrap" @click.stop>
-              <v-checkbox-btn
-                :model-value="isSelected(group.key)"
-                color="success"
-                density="compact"
-                class="tw-select-checkbox"
-                @update:model-value="toggleSelect(group.key)"
-              />
+              <button
+                type="button"
+                class="tw-select-box"
+                :class="{ 'is-selected': isSelected(group.key) }"
+                :title="isSelected(group.key) ? '取消选择' : '选择此媒体'"
+                @click="toggleSelect(group.key)"
+              >
+                <v-icon v-if="isSelected(group.key)" icon="mdi-check" size="x-small" />
+              </button>
             </div>
 
             <div class="tw-overlay">
@@ -182,7 +184,7 @@
               <div class="text-subtitle-1">{{ state.detail?.year || '未知年份' }} · {{ state.detail?.type || '未分类' }}</div>
               <div class="text-caption text-medium-emphasis">
                 {{ state.detail?.record_count || 0 }} 条整理记录
-                <span v-if="state.detail?.seasons"> · 季：{{ state.detail.seasons }}</span>
+                <span v-if="formatSeasonList(state.detail?.seasons)"> · 季：{{ formatSeasonList(state.detail.seasons) }}</span>
                 <span v-if="state.detail?.records_truncated"> · 仅显示最近 200 条</span>
               </div>
               <div class="tw-detail-actions">
@@ -202,18 +204,99 @@
             </div>
           </div>
 
+          <!-- 按季分类 + 整季勾选 -->
+          <div v-if="detailSeasonTabs.length > 1" class="tw-season-bar">
+            <span class="tw-season-bar-label">按季操作：</span>
+            <div class="tw-season-tabs">
+              <button
+                v-for="tab in detailSeasonTabs"
+                :key="tab.key"
+                type="button"
+                class="tw-season-tab"
+                :class="{ active: state.seasonFilter === tab.key }"
+                @click="state.seasonFilter = tab.key"
+              >
+                {{ tab.label }} <span class="tw-season-tab-count">{{ tab.count }}</span>
+              </button>
+            </div>
+            <div class="tw-season-selects">
+              <template v-for="tab in detailSeasonTabs" :key="'sel-' + tab.key">
+                <div v-if="tab.key !== 'all'" class="tw-season-select-item">
+                  <button
+                    type="button"
+                    class="tw-select-box tw-season-select"
+                    :class="{ 'is-selected': isSeasonFullySelected(tab.key) }"
+                    :title="`勾选/取消${tab.label}全部记录`"
+                    @click="toggleSeasonSelection(tab.key, !isSeasonFullySelected(tab.key))"
+                  >
+                    <v-icon
+                      v-if="isSeasonFullySelected(tab.key)"
+                      icon="mdi-check"
+                      size="x-small"
+                    />
+                    <v-icon
+                      v-else-if="isSeasonPartiallySelected(tab.key)"
+                      icon="mdi-minus"
+                      size="x-small"
+                    />
+                  </button>
+                  <span class="text-caption">{{ tab.label }}</span>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <div class="tw-detail-select-bar">
+            <button
+              type="button"
+              class="tw-select-box"
+              :class="{ 'is-selected': allFilteredSelected }"
+              :title="allFilteredSelected ? '取消全选当前季' : '全选当前季'"
+              @click="toggleFilteredSelection(!allFilteredSelected)"
+            >
+              <v-icon v-if="allFilteredSelected" icon="mdi-check" size="x-small" />
+              <v-icon v-else-if="someFilteredSelected" icon="mdi-minus" size="x-small" />
+            </button>
+            <span class="text-caption">全选当前季（{{ filteredDetailRecords.length }} 条）</span>
+            <v-spacer />
+            <span class="text-caption text-medium-emphasis tw-selected-count">
+              已勾选 {{ state.detailSelected.length }} 条
+            </span>
+            <v-btn
+              size="small"
+              color="error"
+              variant="flat"
+              :disabled="!state.detailSelected.length"
+              prepend-icon="mdi-delete-outline"
+              @click="deleteSelectedInDetail"
+            >
+              删除所选（{{ state.detailSelected.length }}）
+            </v-btn>
+          </div>
+
           <div
-            v-for="record in state.detail?.records || []"
+            v-for="record in filteredDetailRecords"
             :key="record.id"
             class="tw-record"
+            :class="{ 'is-checked': state.detailSelected.includes(record.id) }"
           >
             <div class="tw-record-top">
+              <button
+                type="button"
+                class="tw-select-box tw-record-select"
+                :class="{ 'is-selected': state.detailSelected.includes(record.id) }"
+                :title="state.detailSelected.includes(record.id) ? '取消选择' : '选择此记录'"
+                @click="toggleDetailSelect(record.id)"
+              >
+                <v-icon v-if="state.detailSelected.includes(record.id)" icon="mdi-check" size="x-small" />
+              </button>
               <v-chip size="x-small" :color="record.status ? 'success' : 'error'" variant="tonal">
                 {{ record.status ? '成功' : '失败' }}
               </v-chip>
               <span class="text-caption">{{ record.date || ' unknown date' }}</span>
-              <span v-if="record.seasons" class="text-caption">S{{ record.seasons }}</span>
-              <span v-if="record.episodes" class="text-caption">E{{ record.episodes }}</span>
+              <span v-if="formatSeasonEpisode(record.seasons, record.episodes)" class="text-caption tw-season-ep">
+                {{ formatSeasonEpisode(record.seasons, record.episodes) }}
+              </span>
               <v-spacer />
               <v-btn size="x-small" variant="text" @click="openDelete([record.id], '删除单条整理记录', { record: true, src: false, dest: false })">
                 删记录
@@ -309,6 +392,44 @@ const typeOptions = [
   { title: '电视剧', value: 'tv' },
 ]
 
+// 季集数据原始值形如 "S02" / "E08"（自带前缀），解析为数字数组
+function parseNums(value) {
+  if (value === null || value === undefined || value === '') return []
+  return String(value)
+    .toUpperCase()
+    .split(/[^0-9]+/)
+    .filter(Boolean)
+    .map((part) => Number(part))
+    .filter((num) => Number.isFinite(num) && num > 0)
+}
+
+// "S02" + "E08" => "第2季第8集"；支持多个季/集
+function formatSeasonEpisode(seasons, episodes) {
+  const ss = parseNums(seasons)
+  const es = parseNums(episodes)
+  const parts = []
+  if (ss.length) parts.push(ss.length === 1 ? `第${ss[0]}季` : `第${ss.join('、')}季`)
+  if (es.length) parts.push(es.length === 1 ? `第${es[0]}集` : `第${es.join('、')}集`)
+  return parts.join('')
+}
+
+// "S01,S02" => "第1季、第2季"
+function formatSeasonList(value) {
+  return parseNums(value)
+    .map((num) => `第${num}季`)
+    .join('、')
+}
+
+// 记录归属的季（取第一个季数字），无季返回 'none'
+function seasonKeyOf(record) {
+  const nums = parseNums(record?.seasons)
+  return nums.length ? String(nums[0]) : 'none'
+}
+
+function seasonLabelOf(key) {
+  return key === 'none' ? '未分季' : `第${key}季`
+}
+
 const state = reactive({
   groups: [],
   page: 1,
@@ -325,6 +446,8 @@ const state = reactive({
   selected: [],
   detail: null,
   detailDialog: false,
+  seasonFilter: 'all',
+  detailSelected: [],
   confirmDialog: false,
   confirmLabel: '',
   confirmIds: [],
@@ -346,6 +469,90 @@ const currentKeys = computed(() => state.groups.map((group) => group.key))
 const allCurrentSelected = computed(
   () => currentKeys.value.length > 0 && currentKeys.value.every((key) => state.selected.includes(key))
 )
+
+// 详情弹窗：按季分类标签
+const detailSeasonTabs = computed(() => {
+  const records = state.detail?.records || []
+  const counts = new Map()
+  records.forEach((record) => {
+    const key = seasonKeyOf(record)
+    counts.set(key, (counts.get(key) || 0) + 1)
+  })
+  const tabs = [{ key: 'all', label: '全部', count: records.length }]
+  ;[...counts.entries()]
+    .sort((a, b) => {
+      if (a[0] === 'none') return 1
+      if (b[0] === 'none') return -1
+      return Number(a[0]) - Number(b[0])
+    })
+    .forEach(([key, count]) => tabs.push({ key, label: seasonLabelOf(key), count }))
+  return tabs
+})
+
+const filteredDetailRecords = computed(() => {
+  const records = state.detail?.records || []
+  if (state.seasonFilter === 'all') return records
+  return records.filter((record) => seasonKeyOf(record) === state.seasonFilter)
+})
+
+const filteredDetailIds = computed(() =>
+  filteredDetailRecords.value.map((record) => record.id).filter((id) => id !== null && id !== undefined)
+)
+
+const allFilteredSelected = computed(
+  () => filteredDetailIds.value.length > 0 && filteredDetailIds.value.every((id) => state.detailSelected.includes(id))
+)
+const someFilteredSelected = computed(
+  () => !allFilteredSelected.value && filteredDetailIds.value.some((id) => state.detailSelected.includes(id))
+)
+
+function seasonIds(key) {
+  return (state.detail?.records || [])
+    .filter((record) => seasonKeyOf(record) === key)
+    .map((record) => record.id)
+    .filter((id) => id !== null && id !== undefined)
+}
+
+function isSeasonFullySelected(key) {
+  const ids = seasonIds(key)
+  return ids.length > 0 && ids.every((id) => state.detailSelected.includes(id))
+}
+
+function isSeasonPartiallySelected(key) {
+  const ids = seasonIds(key)
+  return !isSeasonFullySelected(key) && ids.some((id) => state.detailSelected.includes(id))
+}
+
+function toggleSeasonSelection(key, value) {
+  const ids = seasonIds(key)
+  if (value === true || (value !== false && !isSeasonFullySelected(key))) {
+    ids.forEach((id) => {
+      if (!state.detailSelected.includes(id)) state.detailSelected.push(id)
+    })
+  } else {
+    const remove = new Set(ids)
+    state.detailSelected = state.detailSelected.filter((id) => !remove.has(id))
+  }
+}
+
+function toggleDetailSelect(id) {
+  const index = state.detailSelected.indexOf(id)
+  if (index >= 0) state.detailSelected.splice(index, 1)
+  else state.detailSelected.push(id)
+}
+
+function toggleFilteredSelection(value) {
+  const shouldSelect = value === true || (value !== false && !allFilteredSelected.value)
+  const ids = filteredDetailIds.value
+  if (shouldSelect) {
+    ids.forEach((id) => {
+      if (!state.detailSelected.includes(id)) state.detailSelected.push(id)
+    })
+  } else {
+    const remove = new Set(ids)
+    state.detailSelected = state.detailSelected.filter((id) => !remove.has(id))
+  }
+}
 
 function notify(type, message) {
   const fn = toast && typeof toast[type] === 'function' ? toast[type] : null
@@ -441,6 +648,8 @@ function selectCurrentPage() {
 
 function openDetail(group) {
   state.detail = group
+  state.seasonFilter = 'all'
+  state.detailSelected = []
   state.detailDialog = true
 }
 
@@ -499,6 +708,19 @@ function bulkDelete() {
   }
   const ids = records.map((record) => record.id).filter(Boolean)
   openDelete(ids, `批量删除 ${state.selected.length} 部媒体`, {
+    record: state.config.default_delete_record,
+    src: state.config.default_delete_src,
+    dest: state.config.default_delete_dest,
+  })
+}
+
+function deleteSelectedInDetail() {
+  if (!state.detailSelected.length) {
+    notify('warning', '请先勾选要删除的记录或选择整季')
+    return
+  }
+  const ids = [...state.detailSelected]
+  openDelete(ids, `所选 ${ids.length} 条记录（按季/勾选）`, {
     record: state.config.default_delete_record,
     src: state.config.default_delete_src,
     dest: state.config.default_delete_dest,
@@ -630,17 +852,105 @@ onMounted(loadWall)
   background: transparent;
   border-radius: 4px;
 }
-/* 未选中：白色描边的空心框，在海报上清晰可见 */
-.tw-select-checkbox :deep(.v-selection-control__wrapper) {
-  background: rgba(255, 255, 255, 0.9) !important;
-  border-radius: 4px;
+/* 右上角勾选框：未选中为亮绿色描边空心框，选中为绿色实心 + 白色对勾 */
+.tw-select-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid #22c55e;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #16a34a;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 6px rgba(34, 197, 94, 0.7);
+  transition: background 0.15s, border-color 0.15s;
 }
-.tw-select-checkbox :deep(.v-input__control) {
+.tw-select-box.is-selected {
+  border-color: #16a34a;
+  background: #22c55e;
+  color: #ffffff;
+}
+.tw-record-select {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+.tw-season-ep {
+  color: rgb(var(--v-theme-primary));
+  font-weight: 600;
+}
+.tw-season-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  border-radius: 6px;
+  background: rgba(34, 197, 94, 0.06);
+}
+.tw-season-bar-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tw-season-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tw-season-tab {
+  padding: 4px 10px;
+  border: 1px solid rgba(127, 127, 127, 0.4);
+  border-radius: 14px;
   background: transparent;
+  color: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
 }
-/* 选中：绿色实心框 + 白色对勾 */
-.tw-select-checkbox :deep(.v-selection-control--dirty .v-selection-control__input) {
-  color: #2e7d32 !important;
+.tw-season-tab.active {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.18);
+  color: #16a34a;
+  font-weight: 600;
+}
+.tw-season-tab-count {
+  opacity: 0.75;
+  font-size: 0.72rem;
+}
+.tw-season-selects {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-left: auto;
+}
+.tw-season-select-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tw-season-select {
+  width: 18px;
+  height: 18px;
+}
+.tw-detail-select-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 6px;
+}
+.tw-selected-count {
+  white-space: nowrap;
 }
 .tw-overlay {
   position: absolute;
@@ -717,6 +1027,10 @@ onMounted(loadWall)
   margin-bottom: 8px;
   border: 1px solid rgba(127, 127, 127, 0.3);
   border-radius: 6px;
+}
+.tw-record.is-checked {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.07);
 }
 .tw-record-top {
   display: flex;
