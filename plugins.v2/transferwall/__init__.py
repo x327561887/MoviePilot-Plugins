@@ -44,7 +44,7 @@ class TransferWall(_PluginBase):
     plugin_name = "整理海报墙 TransferWall"
     plugin_desc = "TransferWall 整理海报墙：在「整理」中显示转移记录海报墙，可删除记录、源文件与媒体库文件。"
     plugin_icon = "Moviepilot_A.png"
-    plugin_version = "1.0.1"
+    plugin_version = "1.0.2"
     plugin_author = "WorkBuddy"
     author_url = "https://github.com/jxxghp/MoviePilot"
     plugin_config_prefix = "transferwall_"
@@ -73,7 +73,7 @@ class TransferWall(_PluginBase):
             "nav_title": "整理海报墙",
             "nav_icon": "mdi-view-gallery",
             "max_records": 1200,
-            "max_batch": 20,
+            "max_batch": 100,
             "default_delete_record": True,
             "default_delete_src": False,
             "default_delete_dest": False,
