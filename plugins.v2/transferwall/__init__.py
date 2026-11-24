@@ -10,7 +10,9 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from fastapi import Body, Depends, HTTPException
 from app.plugins import _PluginBase
@@ -227,6 +229,13 @@ class TransferWall(_PluginBase):
         data["src_fileitem"] = data.get("src_fileitem") if isinstance(data.get("src_fileitem"), dict) else {}
         data["dest_fileitem"] = data.get("dest_fileitem") if isinstance(data.get("dest_fileitem"), dict) else {}
         data["files"] = data.get("files") if isinstance(data.get("files"), list) else []
+
+        # 海报 URL 规范化：对齐 MoviePilot V2 官方 getHistoryPosterUrl 逻辑。
+        # 相对路径（如 /xx.jpg、posters/xx.jpg）浏览器无法直接加载，需交给
+        # 宿主图片代理 api/v1/system/img/0 解析补全，否则会显示灰色占位图。
+        image = str(data.get("image") or "").strip()
+        if image and not re.match(r"^https?://", image, re.IGNORECASE):
+            data["image"] = "api/v1/system/img/0?imgurl=" + quote(image, safe="")
         return data
 
     @staticmethod
