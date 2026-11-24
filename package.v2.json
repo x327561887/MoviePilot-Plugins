@@ -3,13 +3,14 @@
     "name": "整理海报墙 TransferWall",
     "description": "TransferWall 整理海报墙：在主界面整理分组显示转移记录海报墙，支持删除整理记录、源文件和媒体库文件，可按海报聚合批量清理。",
     "labels": "整理,海报墙,文件清理",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "icon": "https://raw.githubusercontent.com/x327561887/MoviePilot-Plugins/main/icons/transferwall.png",
     "author": "x327561887",
     "level": 1,
     "v3": false,
     "release": false,
     "history": {
+      "v1.0.1": "修复相对路径海报显示灰色占位图的问题，自动走 MoviePilot 图片代理补全；修复插件图标在图片代理白名单下不显示的问题",
       "v1.0.0": "初始版本：整理记录聚合海报墙，支持记录/源文件/媒体库文件删除；按季分类与勾选批量删除；亮绿色勾选框；自定义 LOGO"
     }
   },
