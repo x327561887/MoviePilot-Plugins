@@ -43,10 +43,10 @@ CONFIRM_TOKEN = "删除"
 class TransferWall(_PluginBase):
     """整理记录海报墙插件。"""
 
-    plugin_name = "整理海报墙 TransferWall"
+    plugin_name = "整理海报墙"
     plugin_desc = "TransferWall 整理海报墙：在「整理」中显示转移记录海报墙，可删除记录、源文件与媒体库文件。"
     plugin_icon = "https://raw.githubusercontent.com/x327561887/MoviePilot-Plugins/main/icons/transferwall.png"
-    plugin_version = "1.0.1"
+    plugin_version = "1.0.2"
     plugin_author = "x327561887"
     author_url = "https://github.com/x327561887"
     plugin_config_prefix = "transferwall_"
@@ -234,7 +234,9 @@ class TransferWall(_PluginBase):
         # 相对路径（如 /xx.jpg、posters/xx.jpg）浏览器无法直接加载，需交给
         # 宿主图片代理 api/v1/system/img/0 解析补全，否则会显示灰色占位图。
         image = str(data.get("image") or "").strip()
-        if image and not re.match(r"^https?://", image, re.IGNORECASE):
+        if image and not image.startswith("api/v1/system/img/"):
+            # 统一交给宿主图片代理处理：服务端能补全相对路径、处理鉴权与缓存，
+            # 前端直接用相对 api/v1/ 即可（与官方 TransferHistoryView 一致）。
             data["image"] = "api/v1/system/img/0?imgurl=" + quote(image, safe="")
         return data
 
