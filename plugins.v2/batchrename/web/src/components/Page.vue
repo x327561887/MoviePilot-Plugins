@@ -2,7 +2,7 @@
   <div class="br-page">
     <div class="br-card">
       <div class="br-head">
-        <h1>批量改名（顺序重编号） - 插件详情</h1>
+        <h1>批量改名 - 插件详情</h1>
         <span class="br-close" @click="emit('close')">✕</span>
       </div>
       <div class="br-body">
@@ -24,8 +24,8 @@
         <div class="br-rule">
           当前目录：<b>{{ sourceLabel }}</b><br>
           改名规则：<b>S{{ pad(season) }}</b>（所有季号统一替换）；
-          未改名的文件 <b>按原集数从小到大</b>，依次改为 <b>E{{ start }} 起连续递增</b>；
-          <b>「第 XX 集」按新集号自动改写</b>。目录中已是 S{{ pad(season) }} 的文件保持不动。
+          所有文件 <b>按原集数从小到大</b>，依次改为 <b>E{{ start }} 起连续递增</b>；
+          <b>「第 XX 集」按新集号自动改写</b>。所有文件均可勾选修改（含已是目标季号的）。
         </div>
 
         <div class="br-alert error" v-if="error">{{ error }}</div>
@@ -85,7 +85,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'openConfig'])
 
 const season = ref(Number((props.model || {}).season || 1))
-const start = ref(Number((props.model || {}).start_episode || 72))
+const start = ref(Number((props.model || {}).start_episode || 1))
 const sourceLabel = computed(() => (props.model || {}).source_dir || '未设置目录')
 
 const loading = ref(false)
@@ -96,6 +96,7 @@ const items = ref([])
 const summary = reactive({ generated_at: '', total: 0, ready: 0, exist: 0 })
 const selected = ref(new Set())
 const canUndo = ref(false)
+const toastText = ref('')
 
 const readyIndexes = computed(() => items.value.filter(i => i.status === 'ready').map(i => i.old_name))
 const allChecked = computed(() => readyIndexes.value.length > 0 && readyIndexes.value.every(n => selected.value.has(n)))

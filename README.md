@@ -24,7 +24,7 @@ https://github.com/x327561887/MoviePilot-Plugins
 ├── plugins.v2/              # V2 插件源码目录
 │   ├── transferwall/        # 整理海报墙
 │   ├── hostsurl/            # 远程 Hosts
-│   └── batchrename/         # 批量改名（顺序重编号）
+│   └── batchrename/         # 批量改名
 └── README.md
 ```
 
@@ -38,7 +38,7 @@ MoviePilot 安装时会读取根目录 `package.v2.json`，再从 `plugins.v2/<�
 | --- | --- | --- |
 | `TransferWall` | 整理海报墙 | 在「整理」分组显示转移记录海报墙，支持删除整理记录、源文件、媒体库文件 |
 | `HostsUrl` | 远程Hosts | 定时从远程 URL 拉取 hosts 规则并写入系统，支持手动更新 |
-| `BatchRename` | 批量改名（顺序重编号） | 目录+扩展名+目标季号+起始集号；预览后逐行选择文件批量改名，中文集数自动同步 |
+| `BatchRename` | 批量改名 | 配置页填目录+扩展名；详情页目标季号/起始集，预览后勾选文件批量改名，中文集数自动同步 |
 
 ## TransferWall（整理海报墙）
 

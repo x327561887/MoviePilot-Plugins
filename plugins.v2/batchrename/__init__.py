@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 """MoviePilot V2 批量改名插件（Vue 联邦模块界面）。
 
-配置页：剧集目录 + 处理扩展名（默认 mp4, mkv, srt, ass）。
-详情页：目标季号 SXX、起始集号两个输入框；点「预览改名」列出文件；
+配置页：剧集目录（默认 /mdeia）+ 处理扩展名（默认 MP4, MKV, SRT, ASS）。
+详情页：目标季号 SXX、起始集号（默认 01）两个输入框；点「预览改名」列出文件；
 勾选要处理的文件后执行批量改名；可一键恢复上次改名。
 
-改名规则：保留原标题，季号统一替换为目标季号；选中的文件按原集数从小到大
-依次改为起始集起的连续集号，「第 XX 集」自动跟随新集号。
-已为目标季号的文件标为「已存在」，不参与改名。
+改名规则：保留原标题，季号统一替换为目标季号；所有识别到集数的文件按原集数从小到大
+依次改为起始集起的连续集号，「第 XX 集」自动跟随新集号。已是目标季号的文件同样参与重新编号。
 
-示例（目标季号 1、起始集号 72）：
+示例（目标季号 1、起始集号 1）：
     Re：从零开始的异世界生活 - S04E06 - 第 6 集.mkv
-    -> Re：从零开始的异世界生活 - S01E72 - 第 72 集.mkv
+    -> Re：从零开始的异世界生活 - S01E01 - 第 1 集.mkv
 
 不覆盖已有文件，执行失败自动回滚。
 """
@@ -27,17 +26,18 @@ from app.plugins import _PluginBase
 from app.log import logger
 
 
-DEFAULT_EXTENSIONS = "mp4, mkv, srt, ass"
+DEFAULT_EXTENSIONS = "MP4, MKV, SRT, ASS"
+DEFAULT_SOURCE_DIR = "/mdeia"
 APPLY_KEY = "batch_rename_last_apply"
 
 
 class BatchRename(_PluginBase):
     """按目标季号与起始集批量重排剧集编号的插件。"""
 
-    plugin_name = "批量改名（顺序重编号）"
+    plugin_name = "批量改名"
     plugin_desc = "设置目录后预览文件、勾选批量改名：季号统一替换，集号按起始集递增，中文集数自动同步。"
     plugin_icon = "https://raw.githubusercontent.com/x327561887/MoviePilot-Plugins/main/plugins.v2/batchrename/icon.png"
-    plugin_version = "1.2.0"
+    plugin_version = "1.2.1"
     plugin_author = "x327561887"
     author_url = "https://github.com/x327561887"
     plugin_config_prefix = "batchrename_"
@@ -60,10 +60,10 @@ class BatchRename(_PluginBase):
     def _default_config() -> Dict[str, Any]:
         return {
             "enabled": True,
-            "source_dir": "",
+            "source_dir": DEFAULT_SOURCE_DIR,
             "extensions": DEFAULT_EXTENSIONS,
             "season": 1,
-            "start_episode": 72,
+            "start_episode": 1,
         }
 
     def _current_config(self) -> Dict[str, Any]:
@@ -78,10 +78,10 @@ class BatchRename(_PluginBase):
     def init_plugin(self, config: dict = None):
         config = config or {}
         self._enabled = True
-        self._source_dir = str(config.get("source_dir") or "").strip()
+        self._source_dir = str(config.get("source_dir") or DEFAULT_SOURCE_DIR).strip() or DEFAULT_SOURCE_DIR
         self._extensions = str(config.get("extensions") or DEFAULT_EXTENSIONS).strip() or DEFAULT_EXTENSIONS
         self._season = self._as_int(config.get("season"), 1, 0, 999)
-        self._start_episode = self._as_int(config.get("start_episode"), 72, 1, 99999)
+        self._start_episode = self._as_int(config.get("start_episode"), 1, 1, 99999)
 
     def get_state(self) -> bool:
         return True
@@ -216,6 +216,8 @@ class BatchRename(_PluginBase):
                 continue
             source = Path(item["src"])
             target = Path(item["dst"])
+            if source == target:
+                continue
             if not source.is_file():
                 errors.append(f"源文件已不存在：{source.name}")
                 continue
@@ -271,6 +273,8 @@ class BatchRename(_PluginBase):
                 target = Path(item["dst"])
             except (KeyError, TypeError):
                 continue
+            if source == target:
+                continue
             if not target.is_file():
                 errors.append(f"改名后的文件不存在：{target.name}")
                 continue
@@ -318,8 +322,8 @@ class BatchRename(_PluginBase):
         if not parsed:
             raise ValueError("文件名中没有识别到 SxxExx 或「第xx集」")
 
-        pending = [entry for entry in parsed if entry[3] != season]
-        old_eps = sorted({entry[2] for entry in pending})
+        # 所有识别到集数的文件（含已是目标季号的）统一按原集数从小到大重新编号
+        old_eps = sorted({entry[2] for entry in parsed})
         episode_map = {old: start + index for index, old in enumerate(old_eps)}
 
         season_str = str(season).zfill(2)
@@ -328,19 +332,19 @@ class BatchRename(_PluginBase):
         target_names: Dict[str, str] = {}
         for path, title, old_episode, old_season in parsed:
             src = path.resolve()
-            if old_season == season:
-                new_episode = old_episode
-                status = "exist"
-                reason = "已是目标季号，不改动"
-            else:
-                new_episode = episode_map.get(old_episode, old_episode)
-                status = "ready" if old_episode in episode_map else "exist"
-                reason = "" if status == "ready" else "无需改动"
-
+            new_episode = episode_map.get(old_episode, old_episode)
             stem = self._safe_stem(
                 f"{title} - S{season_str}E{str(new_episode).zfill(2)} - 第 {new_episode} 集"
             )
             dst = src.with_name(f"{stem}{src.suffix}")
+            # 只有改名后文件名完全不变的文件才标为「已存在」且不可勾选；
+            # 其余文件（含已是目标季号但集号需重排的）均可勾选修改。
+            if src == dst:
+                status = "exist"
+                reason = "已是目标文件名，无需改动"
+            else:
+                status = "ready"
+                reason = ""
             record = {
                 "src": str(src), "dst": str(dst),
                 "old_name": src.name, "new_name": dst.name,
