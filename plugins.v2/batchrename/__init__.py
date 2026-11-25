@@ -1,19 +1,20 @@
 # -*- coding: utf-8 -*-
-"""MoviePilot V2 批量改名插件。
+"""MoviePilot V2 批量改名插件（Vue 联邦模块界面）。
 
-配置页填写剧集目录、处理扩展名、目标季号与起始集号；详情页点「预览改名」列出文件，
-逐行点「选择」挑选要改的文件，再执行批量改名。
+配置页：剧集目录 + 处理扩展名（默认 mp4, mkv, srt, ass）。
+详情页：目标季号 SXX、起始集号两个输入框；点「预览改名」列出文件；
+勾选要处理的文件后执行批量改名；可一键恢复上次改名。
 
-改名规则：保留原标题，季号统一替换为目标季号，选中文件按原集数从小到大依次改为
-起始集起的连续集号，「第 XX 集」自动跟随新集号。已为目标季号的文件标为「已存在」不改动。
+改名规则：保留原标题，季号统一替换为目标季号；选中的文件按原集数从小到大
+依次改为起始集起的连续集号，「第 XX 集」自动跟随新集号。
+已为目标季号的文件标为「已存在」，不参与改名。
 
 示例（目标季号 1、起始集号 72）：
     Re：从零开始的异世界生活 - S04E06 - 第 6 集.mkv
     -> Re：从零开始的异世界生活 - S01E72 - 第 72 集.mkv
 
-执行不覆盖已有文件，失败自动回滚，并可一键恢复上次改名。
+不覆盖已有文件，执行失败自动回滚。
 """
-
 from __future__ import annotations
 
 import re
@@ -22,81 +23,107 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import Body
-from fastapi.responses import JSONResponse
-
 from app.plugins import _PluginBase
 from app.log import logger
 
 
-DEFAULT_EXTENSIONS = "mp4,mkv,srt,ass"
-PREVIEW_KEY = "batch_rename_preview"
+DEFAULT_EXTENSIONS = "mp4, mkv, srt, ass"
 APPLY_KEY = "batch_rename_last_apply"
-SELECT_KEY = "batch_rename_selection"
-
-STATUS_LABELS = {
-    "ready": "待修改",
-    "exist": "已存在",
-    "done": "已改名",
-    "conflict": "跳过（冲突）",
-}
 
 
 class BatchRename(_PluginBase):
     """按目标季号与起始集批量重排剧集编号的插件。"""
 
     plugin_name = "批量改名（顺序重编号）"
-    plugin_desc = "设置目录后预览文件、逐行勾选批量改名：季号统一替换，集号按起始集递增，中文集数自动同步。"
+    plugin_desc = "设置目录后预览文件、勾选批量改名：季号统一替换，集号按起始集递增，中文集数自动同步。"
     plugin_icon = "https://raw.githubusercontent.com/x327561887/MoviePilot-Plugins/main/plugins.v2/batchrename/icon.png"
-    plugin_version = "1.1.0"
+    plugin_version = "1.2.0"
     plugin_author = "x327561887"
     author_url = "https://github.com/x327561887"
     plugin_config_prefix = "batchrename_"
     plugin_order = 50
     auth_level = 1
 
-    _enabled = False
-    _source_dir = ""
-    _extensions = DEFAULT_EXTENSIONS
-    _season = 1
-    _start_episode = 1
+    def __init__(self):
+        super().__init__()
+        config = self._default_config()
+        self._enabled = True
+        self._source_dir = config["source_dir"]
+        self._extensions = config["extensions"]
+        self._season = config["season"]
+        self._start_episode = config["start_episode"]
 
-    def init_plugin(self, config: Optional[Dict[str, Any]] = None) -> None:
-        if config is None:
-            try:
-                config = self.get_config() or {}
-            except Exception:
-                config = {}
+    # ------------------------------------------------------------------
+    # 生命周期
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _default_config() -> Dict[str, Any]:
+        return {
+            "enabled": True,
+            "source_dir": "",
+            "extensions": DEFAULT_EXTENSIONS,
+            "season": 1,
+            "start_episode": 72,
+        }
+
+    def _current_config(self) -> Dict[str, Any]:
+        return {
+            "enabled": bool(self._enabled),
+            "source_dir": self._source_dir,
+            "extensions": self._extensions,
+            "season": self._season,
+            "start_episode": self._start_episode,
+        }
+
+    def init_plugin(self, config: dict = None):
         config = config or {}
-        self._enabled = bool(config.get("enabled"))
+        self._enabled = True
         self._source_dir = str(config.get("source_dir") or "").strip()
         self._extensions = str(config.get("extensions") or DEFAULT_EXTENSIONS).strip() or DEFAULT_EXTENSIONS
         self._season = self._as_int(config.get("season"), 1, 0, 999)
-        self._start_episode = self._as_int(config.get("start_episode"), 1, 1, 99999)
+        self._start_episode = self._as_int(config.get("start_episode"), 72, 1, 99999)
 
     def get_state(self) -> bool:
-        return self._enabled
+        return True
 
     @staticmethod
     def get_command() -> List[Dict[str, Any]]:
         return []
 
+    @staticmethod
+    def get_render_mode() -> Tuple[str, str]:
+        """Vue 联邦模块模式：配置页由 ./Config、详情页由 ./Page 渲染。"""
+        return "vue", "dist/assets"
+
+    def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
+        return [], self._default_config()
+
+    def get_page(self) -> List[dict]:
+        return []
+
     def get_api(self) -> List[Dict[str, Any]]:
         return [
+            {
+                "path": "/config",
+                "endpoint": self.config_status,
+                "methods": ["GET"],
+                "auth": "",
+                "summary": "读取批量改名配置",
+            },
+            {
+                "path": "/config",
+                "endpoint": self.save_config,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "保存批量改名配置",
+            },
             {
                 "path": "/preview",
                 "endpoint": self.api_preview,
                 "methods": ["POST"],
                 "auth": "bear",
                 "summary": "预览改名",
-                "description": "按配置扫描目录生成改名清单，不修改文件。",
-            },
-            {
-                "path": "/select",
-                "endpoint": self.api_select,
-                "methods": ["POST"],
-                "auth": "bear",
-                "summary": "选择/取消文件",
-                "description": "传入 index 切换该文件的选中状态，或传 action=all/none 全选/清空。",
+                "description": "按传入的季号与起始集扫描目录，生成改名清单，不修改文件。",
             },
             {
                 "path": "/apply",
@@ -112,258 +139,80 @@ class BatchRename(_PluginBase):
                 "methods": ["POST"],
                 "auth": "bear",
                 "summary": "恢复上次改名",
-                "description": "按最近一次执行记录把文件名改回原名。",
             },
         ]
 
-    def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
-        """配置页：目录、扩展名、目标季号、起始集号。"""
-        fields = [
-            self._field("VSwitch", "enabled", "启用插件", md=3),
-            self._field(
-                "VTextField", "source_dir", "剧集目录（容器内的绝对路径）", md=9,
-                placeholder="/media/电视剧/日番/Re：从零开始的异世界生活/Season 4",
-            ),
-            self._field("VTextField", "extensions", "处理扩展名（逗号分隔）", md=6,
-                        placeholder=DEFAULT_EXTENSIONS),
-            self._field("VTextField", "season", "目标季号 SXX", md=3, type="number"),
-            self._field("VTextField", "start_episode", "起始集号", md=3, type="number"),
-        ]
-        return [
-            {
-                "component": "VForm",
-                "content": [
-                    {
-                        "component": "VAlert",
-                        "props": {
-                            "type": "info",
-                            "variant": "tonal",
-                            "class": "mb-4",
-                            "text": (
-                                "填写目录与扩展名（默认 mp4, mkv, srt, ass），并设置目标季号与起始集号。"
-                                "保存后到详情页点「预览改名」，逐行选择要改的文件再执行。"
-                                "改名规则：保留原标题，季号统一替换，集号按原顺序从起始集连续递增，"
-                                "「第 XX 集」自动跟随新集号。"
-                            ),
-                        },
-                    },
-                    {"component": "VRow", "content": fields},
-                ],
-            }
-        ], self._current_config()
-
-    def get_page(self) -> List[dict]:
-        """详情页：预览清单 + 逐行选择 + 执行/恢复。"""
-        preview = self.get_data(PREVIEW_KEY) or {}
-        applied = self.get_data(APPLY_KEY) or {}
-        selection = self.get_data(SELECT_KEY) or {}
-        if not isinstance(preview, dict):
-            preview = {}
-        if not isinstance(applied, dict):
-            applied = {}
-        if not isinstance(selection, dict):
-            selection = {}
-
-        items = preview.get("items") or []
-        ready_count = sum(
-            1 for item in items
-            if isinstance(item, dict) and item.get("status") == "ready"
-        )
-        selected_ids = set(selection.get("ids") or [])
-        selected_ready = sum(
-            1 for index, item in enumerate(items)
-            if isinstance(item, dict) and item.get("status") == "ready" and str(index) in selected_ids
-        )
-
-        summary = (
-            f"预览时间：{preview.get('generated_at') or '无'} | "
-            f"待修改：{ready_count} | 已选择：{selected_ready} | "
-            f"目标季号：S{str(self._season).zfill(2)} | 起始集：{self._start_episode} | "
-            f"最近执行：{applied.get('applied_at') or '无'}"
-        )
-        headers = [
-            {"title": "选择", "key": "pick"},
-            {"title": "状态", "key": "status"},
-            {"title": "原文件名", "key": "old_name"},
-            {"title": "新文件名", "key": "new_name"},
-            {"title": "原集", "key": "old_episode"},
-            {"title": "新集", "key": "new_episode"},
-        ]
-        rows: List[dict] = []
-        for index, item in enumerate(items):
-            if not isinstance(item, dict):
-                continue
-            status_raw = str(item.get("status") or "")
-            is_ready = status_raw == "ready"
-            picked = str(index) in selected_ids
-            rows.append({
-                "pick": "已选" if picked else "选择",
-                "status": STATUS_LABELS.get(status_raw, status_raw),
-                "old_name": str(item.get("old_name") or ""),
-                "new_name": str(item.get("new_name") or ""),
-                "old_episode": str(item.get("old_episode") or ""),
-                "new_episode": str(item.get("new_episode") or ""),
-                "_index": str(index),
-                "_ready": is_ready,
-            })
-
-        pick_buttons = []
-        for row in rows:
-            if not row["_ready"]:
-                continue
-            index = row["_index"]
-            picked = index in selected_ids
-            pick_buttons.append(
-                self._select_button(index, picked)
-            )
-
-        return [
-            {"component": "VAlert", "props": {"type": "info", "variant": "tonal", "text": summary}},
-            {
-                "component": "div",
-                "props": {"class": "d-flex flex-wrap align-center ga-2 my-4"},
-                "content": [
-                    self._action_button("预览改名", "mdi-file-search-outline", "/preview", "primary"),
-                    self._action_button("全选", "mdi-check-all", "/select", "secondary",
-                                        params={"action": "all"}),
-                    self._action_button("清空选择", "mdi-close-circle-outline", "/select", "secondary",
-                                        params={"action": "none"}),
-                    self._action_button(
-                        "执行批量改名", "mdi-pencil-box-multiple-outline", "/apply", "success",
-                        disabled=selected_ready == 0,
-                    ),
-                    self._action_button(
-                        "恢复上次改名", "mdi-undo", "/undo", "secondary",
-                        disabled=not applied.get("items"),
-                    ),
-                ],
-            },
-            {
-                "component": "VAlert",
-                "props": {
-                    "type": "info", "variant": "tonal", "class": "mb-4",
-                    "text": (
-                        "改名规则：保留原标题，季号统一替换为目标季号；选中文件按原集数从小到大，"
-                        "依次改为起始集起的连续集号；「第 XX 集」按新集号自动改写。"
-                        "点击每行「选择」按钮可切换是否处理该文件，已存在的不参与。"
-                    ),
-                },
-            },
-            {
-                "component": "VDataTable",
-                "props": {
-                    "density": "compact",
-                    "headers": headers,
-                    "items": [{k: v for k, v in row.items() if not k.startswith("_")} for row in rows],
-                    "item-value": "old_name",
-                    "items-per-page": 50,
-                },
-            },
-            {
-                "component": "VAlert",
-                "props": {
-                    "type": "warning" if preview.get("skipped") or preview.get("conflicts") else "success",
-                    "variant": "tonal",
-                    "class": "mt-4",
-                    "text": (
-                        "跳过明细：" + "；".join(
-                            str(x) for x in (list(preview.get("skipped") or []) + list(preview.get("conflicts") or []))[:30]
-                        ) if preview.get("skipped") or preview.get("conflicts") else "没有跳过项。"
-                    ),
-                },
-            },
-        ]
-
-    def stop_service(self) -> None:
+    @staticmethod
+    def stop_service():
         return None
 
-    # ---------------- API ----------------
+    # ------------------------------------------------------------------
+    # 配置接口
+    # ------------------------------------------------------------------
+    def config_status(self) -> Dict[str, Any]:
+        return self._ok(self._current_config())
 
-    def api_preview(self, payload: Optional[dict] = Body(default=None)) -> JSONResponse:
-        """按当前配置生成改名清单，默认全选所有待修改项。"""
+    def save_config(self, payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        config = self._default_config()
+        config.update(payload or {})
+        config["enabled"] = True
         try:
-            plan = self._build_plan(self._season, self._start_episode)
+            self.update_config(config)
+        except Exception as error:  # pragma: no cover - 宿主未提供 update_config
+            logger.warning(f"批量改名保存配置失败：{error}")
+            return self._fail(500, f"保存配置失败：{error}")
+        self.init_plugin(config)
+        return self._ok(self._current_config(), "配置已保存")
+
+    # ------------------------------------------------------------------
+    # 业务接口
+    # ------------------------------------------------------------------
+    def api_preview(self, payload: Optional[dict] = Body(default=None)) -> Dict[str, Any]:
+        """按传入参数生成改名清单，不改动文件。"""
+        payload = payload or {}
+        season = self._as_int(payload.get("season"), self._season, 0, 999)
+        start = self._as_int(payload.get("start"), self._start_episode, 1, 99999)
+        try:
+            plan = self._build_plan(season, start)
         except (ValueError, OSError) as error:
             logger.warning(f"批量改名预览失败：{error}")
             return self._fail(400, str(error))
-        self.save_data(PREVIEW_KEY, plan)
-        self.save_data(SELECT_KEY, {
-            "ids": [
-                str(index) for index, item in enumerate(plan["items"])
-                if item.get("status") == "ready"
-            ]
-        })
-        return JSONResponse(content={
-            "success": True,
-            "message": f"预览完成，待修改 {plan['ready_count']} 个文件",
-            "ready_count": plan["ready_count"],
+        return self._ok({
             "items": plan["items"],
+            "total_count": plan["total_count"],
+            "ready_count": plan["ready_count"],
+            "exist_count": sum(1 for i in plan["items"] if i["status"] == "exist"),
             "skipped": plan["skipped"],
             "conflicts": plan["conflicts"],
+            "generated_at": plan["generated_at"],
+            "source": plan["source"],
         })
 
-    def api_select(self, payload: dict = Body(...)) -> JSONResponse:
-        """切换单个文件的选中状态，或全选/清空。"""
+    def api_apply(self, payload: Optional[dict] = Body(default=None)) -> Dict[str, Any]:
+        """按选中的原文件名执行改名，任一步失败回滚。"""
         payload = payload or {}
-        preview = self.get_data(PREVIEW_KEY)
-        if not isinstance(preview, dict) or not preview.get("items"):
-            return self._fail(409, "请先点击「预览改名」")
-        selection = self.get_data(SELECT_KEY) or {}
-        if not isinstance(selection, dict):
-            selection = {}
-        ids = set(str(value) for value in selection.get("ids") or [])
-        action = str(payload.get("action") or "").strip()
-        if action == "all":
-            ids = {
-                str(index) for index, item in enumerate(preview["items"])
-                if isinstance(item, dict) and item.get("status") == "ready"
-            }
-            message = "已全选待修改文件"
-        elif action == "none":
-            ids = set()
-            message = "已清空选择"
-        else:
-            raw_index = payload.get("index")
-            if raw_index is None:
-                return self._fail(400, "缺少 index 参数")
-            index = str(raw_index)
-            if index not in {str(i) for i in range(len(preview["items"]))}:
-                return self._fail(400, "文件序号无效")
-            if index in ids:
-                ids.discard(index)
-                message = "已取消选择"
-            else:
-                ids.add(index)
-                message = "已选择"
-        self.save_data(SELECT_KEY, {"ids": sorted(ids, key=lambda value: int(value) if value.isdigit() else 0)})
-        return JSONResponse(content={"success": True, "message": message, "selected": len(ids)})
+        season = self._as_int(payload.get("season"), self._season, 0, 999)
+        start = self._as_int(payload.get("start"), self._start_episode, 1, 99999)
+        raw_names = payload.get("names") or []
+        if isinstance(raw_names, (str, int)):
+            raw_names = [raw_names]
+        wanted = set(str(value) for value in raw_names)
+        if not wanted:
+            return self._fail(400, "请至少勾选一个文件")
 
-    def api_apply(self, payload: Optional[dict] = Body(default=None)) -> JSONResponse:
-        """按选中的文件执行改名，任一步失败回滚。"""
-        preview = self.get_data(PREVIEW_KEY)
-        if not isinstance(preview, dict) or not preview.get("items"):
-            return self._fail(409, "请先点击「预览改名」")
-        selection = self.get_data(SELECT_KEY) or {}
-        if not isinstance(selection, dict):
-            selection = {}
-        selected_ids = set(str(value) for value in selection.get("ids") or [])
-        if not selected_ids:
-            return self._fail(409, "请至少选择一个文件")
-
-        # 重新扫描，避免预览后目录发生变化
         try:
-            fresh = self._build_plan(self._season, self._start_episode)
+            fresh = self._build_plan(season, start)
         except (ValueError, OSError) as error:
             return self._fail(400, f"重新扫描失败：{error}")
 
         prepared: List[Tuple[Path, Path, dict]] = []
         seen: set = set()
         errors: List[str] = []
-        for index, item in enumerate(fresh["items"]):
-            if str(index) not in selected_ids:
+        for item in fresh["items"]:
+            if item["old_name"] not in wanted:
                 continue
-            if item.get("status") != "ready":
-                errors.append(f"文件已不可修改：{item.get('old_name')}")
+            if item["status"] != "ready":
+                errors.append(f"文件已不可修改：{item['old_name']}")
                 continue
             source = Path(item["src"])
             target = Path(item["dst"])
@@ -402,13 +251,11 @@ class BatchRename(_PluginBase):
                 APPLY_KEY,
                 {"applied_at": time.strftime("%Y-%m-%d %H:%M:%S"), "items": done},
             )
-        self.del_data(PREVIEW_KEY)
-        self.del_data(SELECT_KEY)
         message = f"改名完成，共处理 {len(done)} 个文件"
         logger.info(f"批量改名完成：{len(done)} 个文件")
-        return JSONResponse(content={"success": True, "message": message, "renamed": len(done)})
+        return self._ok({"renamed": len(done)}, message)
 
-    def api_undo(self, payload: Optional[dict] = Body(default=None)) -> JSONResponse:
+    def api_undo(self, payload: Optional[dict] = Body(default=None)) -> Dict[str, Any]:
         """把最近一次改名的文件恢复为原名。"""
         record = self.get_data(APPLY_KEY)
         if not isinstance(record, dict) or not record.get("items"):
@@ -445,10 +292,11 @@ class BatchRename(_PluginBase):
         self.del_data(APPLY_KEY)
         message = f"已恢复 {restored} 个文件名"
         logger.info(f"批量改名回滚完成：{restored} 个文件")
-        return JSONResponse(content={"success": True, "message": message, "restored": restored})
+        return self._ok({"restored": restored}, message)
 
-    # ---------------- 核心逻辑 ----------------
-
+    # ------------------------------------------------------------------
+    # 核心逻辑
+    # ------------------------------------------------------------------
     def _build_plan(self, season: int, start: int) -> Dict[str, Any]:
         """扫描目录并生成改名清单。"""
         source = self._resolve_source()
@@ -519,9 +367,6 @@ class BatchRename(_PluginBase):
         return {
             "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "source": str(source),
-            "config": self._current_config(),
-            "season": season,
-            "start_episode": start,
             "items": items,
             "total_count": len(items),
             "ready_count": sum(1 for item in items if item["status"] == "ready"),
@@ -591,68 +436,11 @@ class BatchRename(_PluginBase):
         except (TypeError, ValueError):
             return default
 
-    def _current_config(self) -> Dict[str, Any]:
-        return {
-            "enabled": self._enabled,
-            "source_dir": self._source_dir,
-            "extensions": self._extensions,
-            "season": self._season,
-            "start_episode": self._start_episode,
-        }
+    @staticmethod
+    def _ok(data: Any, message: str = "ok") -> Dict[str, Any]:
+        return {"success": True, "message": message, "data": data}
 
     @staticmethod
-    def _field(component: str, model: str, label: str, md: Optional[int] = None, **props: Any) -> dict:
-        column: Dict[str, Any] = {"cols": 12}
-        if md:
-            column["md"] = md
-        return {
-            "component": "VCol",
-            "props": column,
-            "content": [{"component": component, "props": {"model": model, "label": label, **props}}],
-        }
-
-    def _action_button(self, text: str, icon: str, path: str, color: str,
-                       disabled: bool = False, params: Optional[dict] = None) -> dict:
-        return {
-            "component": "VBtn",
-            "props": {
-                "class": "ma-1",
-                "variant": "tonal",
-                "color": color,
-                "prepend-icon": icon,
-                "disabled": disabled,
-            },
-            "text": text,
-            "events": {
-                "click": {
-                    "api": f"plugin/{self.__class__.__name__}{path}",
-                    "method": "post",
-                    "params": params or {},
-                }
-            },
-        }
-
-    @staticmethod
-    def _select_button(index: str, picked: bool) -> dict:
-        """详情页每行的选择按钮，静态 params 回传 index。"""
-        return {
-            "component": "VBtn",
-            "props": {
-                "size": "small",
-                "variant": "tonal",
-                "color": "success" if picked else "primary",
-                "prepend-icon": "mdi-check" if picked else "mdi-plus",
-            },
-            "text": "已选" if picked else "选择",
-            "events": {
-                "click": {
-                    "api": "plugin/BatchRename/select",
-                    "method": "post",
-                    "params": {"index": index},
-                }
-            },
-        }
-
-    @staticmethod
-    def _fail(status: int, message: str) -> JSONResponse:
-        return JSONResponse(status_code=status, content={"success": False, "message": message})
+    def _fail(status: int, message: str) -> Dict[str, Any]:
+        logger.warning(f"批量改名失败：{message}")
+        return {"success": False, "status": status, "message": message}
