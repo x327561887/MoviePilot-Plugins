@@ -1,18 +1,19 @@
 # -*- coding: utf-8 -*-
 """MoviePilot V2 批量改名插件（Vue 联邦模块界面）。
 
-配置页：剧集目录（默认 /mdeia）+ 处理扩展名（默认 MP4, MKV, SRT, ASS）。
-详情页：目标季号 SXX、起始集号（默认 01）两个输入框；点「预览改名」列出文件；
-勾选要处理的文件后执行批量改名；可一键恢复上次改名。
+配置页：剧集目录（默认 /media）+ 处理扩展名（默认 mp4,mkv,srt,ass）。
+详情页：目标季号 SXX、起始集号（当前文件集号基准）、修改集数（目标集号）三个输入框；
+点「预览改名」列出文件；勾选要处理的文件后执行批量改名；可一键恢复上次改名。
 
-改名规则：保留原标题，季号统一替换为目标季号；所有识别到集数的文件按原集数从小到大
-依次改为起始集起的连续集号，「第 XX 集」自动跟随新集号。已是目标季号的文件同样参与重新编号。
+改名规则：保留原标题，季号统一替换为目标季号；所有识别到集数的文件按原集号整体平移，
+    新集号 = 原集号 + (修改集数 - 起始集号)
+「第 XX 集」自动跟随新集号。示例（目标季号 1、起始集号 1、修改集数 67）：
+    Re：从零开始的异世界生活 - S01E01 - 第 1 集.mkv
+    -> Re：从零开始的异世界生活 - S01E67 - 第 67 集.mkv
+    Re：从零开始的异世界生活 - S01E06 - 第 6 集.mkv
+    -> Re：从零开始的异世界生活 - S01E72 - 第 72 集.mkv
 
-示例（目标季号 1、起始集号 1）：
-    Re：从零开始的异世界生活 - S04E06 - 第 6 集.mkv
-    -> Re：从零开始的异世界生活 - S01E01 - 第 1 集.mkv
-
-不覆盖已有文件，执行失败自动回滚。
+所有识别到集数的文件均可勾选修改（含已是目标季号的）；不覆盖已有文件，执行失败自动回滚。
 """
 from __future__ import annotations
 
@@ -26,18 +27,18 @@ from app.plugins import _PluginBase
 from app.log import logger
 
 
-DEFAULT_EXTENSIONS = "MP4, MKV, SRT, ASS"
-DEFAULT_SOURCE_DIR = "/mdeia"
+DEFAULT_EXTENSIONS = "mp4,mkv,srt,ass"
+DEFAULT_SOURCE_DIR = "/media"
 APPLY_KEY = "batch_rename_last_apply"
 
 
 class BatchRename(_PluginBase):
-    """按目标季号与起始集批量重排剧集编号的插件。"""
+    """按目标季号与集数平移规则批量重排剧集编号的插件。"""
 
     plugin_name = "批量改名"
-    plugin_desc = "设置目录后预览文件、勾选批量改名：季号统一替换，集号按起始集递增，中文集数自动同步。"
+    plugin_desc = "设置目录后预览文件、勾选批量改名：季号统一替换，集号按起始集/修改集数整体平移，中文集数自动同步。"
     plugin_icon = "https://raw.githubusercontent.com/x327561887/MoviePilot-Plugins/main/plugins.v2/batchrename/icon.png"
-    plugin_version = "1.2.1"
+    plugin_version = "1.3.0"
     plugin_author = "x327561887"
     author_url = "https://github.com/x327561887"
     plugin_config_prefix = "batchrename_"
@@ -52,6 +53,7 @@ class BatchRename(_PluginBase):
         self._extensions = config["extensions"]
         self._season = config["season"]
         self._start_episode = config["start_episode"]
+        self._target_episode = config["target_episode"]
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -64,6 +66,7 @@ class BatchRename(_PluginBase):
             "extensions": DEFAULT_EXTENSIONS,
             "season": 1,
             "start_episode": 1,
+            "target_episode": 1,
         }
 
     def _current_config(self) -> Dict[str, Any]:
@@ -73,6 +76,7 @@ class BatchRename(_PluginBase):
             "extensions": self._extensions,
             "season": self._season,
             "start_episode": self._start_episode,
+            "target_episode": self._target_episode,
         }
 
     def init_plugin(self, config: dict = None):
@@ -82,6 +86,7 @@ class BatchRename(_PluginBase):
         self._extensions = str(config.get("extensions") or DEFAULT_EXTENSIONS).strip() or DEFAULT_EXTENSIONS
         self._season = self._as_int(config.get("season"), 1, 0, 999)
         self._start_episode = self._as_int(config.get("start_episode"), 1, 1, 99999)
+        self._target_episode = self._as_int(config.get("target_episode"), 1, 1, 99999)
 
     def get_state(self) -> bool:
         return True
@@ -123,7 +128,7 @@ class BatchRename(_PluginBase):
                 "methods": ["POST"],
                 "auth": "bear",
                 "summary": "预览改名",
-                "description": "按传入的季号与起始集扫描目录，生成改名清单，不修改文件。",
+                "description": "按传入的季号、起始集号与修改集数扫描目录，生成改名清单，不修改文件。",
             },
             {
                 "path": "/apply",
@@ -170,10 +175,9 @@ class BatchRename(_PluginBase):
     def api_preview(self, payload: Optional[dict] = Body(default=None)) -> Dict[str, Any]:
         """按传入参数生成改名清单，不改动文件。"""
         payload = payload or {}
-        season = self._as_int(payload.get("season"), self._season, 0, 999)
-        start = self._as_int(payload.get("start"), self._start_episode, 1, 99999)
+        season, start, target = self._read_params(payload)
         try:
-            plan = self._build_plan(season, start)
+            plan = self._build_plan(season, start, target)
         except (ValueError, OSError) as error:
             logger.warning(f"批量改名预览失败：{error}")
             return self._fail(400, str(error))
@@ -186,13 +190,13 @@ class BatchRename(_PluginBase):
             "conflicts": plan["conflicts"],
             "generated_at": plan["generated_at"],
             "source": plan["source"],
+            "offset": plan["offset"],
         })
 
     def api_apply(self, payload: Optional[dict] = Body(default=None)) -> Dict[str, Any]:
         """按选中的原文件名执行改名，任一步失败回滚。"""
         payload = payload or {}
-        season = self._as_int(payload.get("season"), self._season, 0, 999)
-        start = self._as_int(payload.get("start"), self._start_episode, 1, 99999)
+        season, start, target = self._read_params(payload)
         raw_names = payload.get("names") or []
         if isinstance(raw_names, (str, int)):
             raw_names = [raw_names]
@@ -201,7 +205,7 @@ class BatchRename(_PluginBase):
             return self._fail(400, "请至少勾选一个文件")
 
         try:
-            fresh = self._build_plan(season, start)
+            fresh = self._build_plan(season, start, target)
         except (ValueError, OSError) as error:
             return self._fail(400, f"重新扫描失败：{error}")
 
@@ -215,29 +219,29 @@ class BatchRename(_PluginBase):
                 errors.append(f"文件已不可修改：{item['old_name']}")
                 continue
             source = Path(item["src"])
-            target = Path(item["dst"])
-            if source == target:
+            target_path = Path(item["dst"])
+            if source == target_path:
                 continue
             if not source.is_file():
                 errors.append(f"源文件已不存在：{source.name}")
                 continue
-            if target.exists():
-                errors.append(f"目标文件已存在：{target.name}")
+            if target_path.exists():
+                errors.append(f"目标文件已存在：{target_path.name}")
                 continue
-            if str(target) in seen:
-                errors.append(f"目标重名：{target.name}")
+            if str(target_path) in seen:
+                errors.append(f"目标重名：{target_path.name}")
                 continue
-            seen.add(str(target))
-            prepared.append((source, target, item))
+            seen.add(str(target_path))
+            prepared.append((source, target_path, item))
         if errors:
             return self._fail(409, "；".join(errors[:5]))
         if not prepared:
             return self._fail(409, "没有可修改的文件")
 
         done: List[dict] = []
-        for source, target, item in prepared:
+        for source, target_path, item in prepared:
             try:
-                source.rename(target)
+                source.rename(target_path)
                 done.append(item)
             except OSError as error:
                 for rollback in reversed(done):
@@ -301,8 +305,18 @@ class BatchRename(_PluginBase):
     # ------------------------------------------------------------------
     # 核心逻辑
     # ------------------------------------------------------------------
-    def _build_plan(self, season: int, start: int) -> Dict[str, Any]:
-        """扫描目录并生成改名清单。"""
+    def _read_params(self, payload: dict) -> Tuple[int, int, int]:
+        """从请求中读取季号、起始集号、修改集数。兼容旧字段名 start。"""
+        season = self._as_int(payload.get("season"), self._season, 0, 999)
+        start = self._as_int(payload.get("start"), self._start_episode, 1, 99999)
+        target = self._as_int(
+            payload.get("target", payload.get("target_episode")),
+            self._target_episode, 1, 99999,
+        )
+        return season, start, target
+
+    def _build_plan(self, season: int, start: int, target: int) -> Dict[str, Any]:
+        """扫描目录并生成改名清单。新集号 = 原集号 + (修改集数 - 起始集号)。"""
         source = self._resolve_source()
         files, ignored = self._collect_files(source)
         if not files:
@@ -322,23 +336,21 @@ class BatchRename(_PluginBase):
         if not parsed:
             raise ValueError("文件名中没有识别到 SxxExx 或「第xx集」")
 
-        # 所有识别到集数的文件（含已是目标季号的）统一按原集数从小到大重新编号
-        old_eps = sorted({entry[2] for entry in parsed})
-        episode_map = {old: start + index for index, old in enumerate(old_eps)}
-
+        # 整体平移：以「起始集号」对应当前命名集号，「修改集数」为目标集号
+        offset = target - start
         season_str = str(season).zfill(2)
         items: List[dict] = []
         conflicts: List[str] = []
         target_names: Dict[str, str] = {}
         for path, title, old_episode, old_season in parsed:
             src = path.resolve()
-            new_episode = episode_map.get(old_episode, old_episode)
+            new_episode = max(1, old_episode + offset)
             stem = self._safe_stem(
                 f"{title} - S{season_str}E{str(new_episode).zfill(2)} - 第 {new_episode} 集"
             )
             dst = src.with_name(f"{stem}{src.suffix}")
             # 只有改名后文件名完全不变的文件才标为「已存在」且不可勾选；
-            # 其余文件（含已是目标季号但集号需重排的）均可勾选修改。
+            # 其余文件（含已是目标季号的）均可勾选修改。
             if src == dst:
                 status = "exist"
                 reason = "已是目标文件名，无需改动"
@@ -376,6 +388,7 @@ class BatchRename(_PluginBase):
             "ready_count": sum(1 for item in items if item["status"] == "ready"),
             "skipped": ignored,
             "conflicts": conflicts,
+            "offset": offset,
         }
 
     def _resolve_source(self) -> Path:

@@ -12,19 +12,23 @@
             <input type="number" v-model.number="season" min="0" max="99" @input="refreshPreview">
           </div>
           <div class="br-param">
-            <label>起始集号</label>
+            <label>起始集号（当前）</label>
             <input type="number" v-model.number="start" min="1" max="9999" @input="refreshPreview">
+          </div>
+          <div class="br-param">
+            <label>修改集数（目标）</label>
+            <input type="number" v-model.number="target" min="1" max="9999" @input="refreshPreview">
           </div>
           <button class="br-btn primary" :disabled="loading" @click="preview">
             🔍 {{ loading ? '扫描中…' : '预览改名' }}
           </button>
-          <button class="br-btn ghost" @click="emit('openConfig')">⚙ 修改目录设置</button>
+          <button class="br-btn ghost" @click="emit('switch')">⚙ 修改目录设置</button>
         </div>
 
         <div class="br-rule">
           当前目录：<b>{{ sourceLabel }}</b><br>
           改名规则：<b>S{{ pad(season) }}</b>（所有季号统一替换）；
-          所有文件 <b>按原集数从小到大</b>，依次改为 <b>E{{ start }} 起连续递增</b>；
+          以当前 <b>E{{ start }}</b> 为基准，整体平移到 <b>E{{ target }}</b>，即 <b>新集号 = 原集号 +（{{ target }} − {{ start }}）</b>（例：E{{ start }}→E{{ target }}、E{{ start + 1 }}→E{{ target + 1 }}）；
           <b>「第 XX 集」按新集号自动改写</b>。所有文件均可勾选修改（含已是目标季号的）。
         </div>
 
@@ -82,11 +86,12 @@ const props = defineProps({
   api: { type: Object, default: () => ({}) },
   pluginId: { type: String, default: 'BatchRename' },
 })
-const emit = defineEmits(['close', 'openConfig'])
+const emit = defineEmits(['close', 'switch'])
 
 const season = ref(Number((props.model || {}).season || 1))
 const start = ref(Number((props.model || {}).start_episode || 1))
-const sourceLabel = computed(() => (props.model || {}).source_dir || '未设置目录')
+const target = ref(Number((props.model || {}).target_episode || 1))
+const sourceLabel = ref((props.model || {}).source_dir || '')
 
 const loading = ref(false)
 const applying = ref(false)
@@ -140,6 +145,7 @@ async function preview() {
     const data = await callApi(`${apiPrefix.value}/preview`, 'post', {
       season: Number(season.value) || 0,
       start: Number(start.value) || 1,
+      target: Number(target.value) || 1,
     })
     items.value = data.items || []
     summary.generated_at = data.generated_at || ''
@@ -183,6 +189,7 @@ async function apply() {
     const data = await callApi(`${apiPrefix.value}/apply`, 'post', {
       season: Number(season.value) || 0,
       start: Number(start.value) || 1,
+      target: Number(target.value) || 1,
       names,
     })
     toast(data?.message || `已完成批量改名，共处理 ${names.length} 个文件`)
@@ -212,8 +219,20 @@ async function undo() {
   }
 }
 
-onMounted(() => {
-  // 详情页不自动扫描：用户点「预览改名」后再列出文件，与原原型一致
+onMounted(async () => {
+  // 主程序通过 api 注入插件客户端；拉取配置以填充输入框与当前目录显示。
+  // 详情页不自动扫描：用户点「预览改名」后再列出文件，与原原型一致。
+  try {
+    const cfg = await callApi(`${apiPrefix.value}/config`, 'get')
+    if (cfg) {
+      if (cfg.season != null) season.value = Number(cfg.season)
+      if (cfg.start_episode != null) start.value = Number(cfg.start_episode)
+      if (cfg.target_episode != null) target.value = Number(cfg.target_episode)
+      if (cfg.source_dir) sourceLabel.value = cfg.source_dir
+    }
+  } catch (err) {
+    // 拉取失败不影响手动输入
+  }
 })
 
 let toastTimer

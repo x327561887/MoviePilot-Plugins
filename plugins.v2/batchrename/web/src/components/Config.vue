@@ -7,11 +7,11 @@
       </div>
       <div class="br-body">
         <div class="br-info"><span class="br-i">i</span>
-          <div>只需填写剧集目录，扩展名默认 <b>MP4, MKV, SRT, ASS</b>。保存后到插件详情页点「预览改名」，勾选要处理的文件再批量修改。改名规则：保留原标题，季号统一替换，集号按你填的起始集连续递增，「第 XX 集」自动跟随新集号。</div>
+          <div>只需填写剧集目录，扩展名默认 <b>mp4,mkv,srt,ass</b>。保存后到插件详情页点「预览改名」，勾选要处理的文件再批量修改。改名规则：保留原标题，季号统一替换，集号按「起始集号→修改集数」整体平移，「第 XX 集」自动跟随新集号。</div>
         </div>
         <div class="br-field">
           <label>剧集目录（MoviePilot 容器内的绝对路径）</label>
-          <input type="text" v-model="config.source_dir" placeholder="例如 /mdeia/动画/Re：从零开始的异世界生活">
+          <input type="text" v-model="config.source_dir" placeholder="例如 /media/动画/Re：从零开始的异世界生活">
           <div class="br-hint">填写容器内部路径，不是宿主机路径</div>
         </div>
         <div class="br-field">
@@ -41,14 +41,14 @@ const saving = ref(false)
 const toastText = ref('')
 
 const config = reactive({
-  source_dir: '/mdeia',
-  extensions: 'MP4, MKV, SRT, ASS',
+  source_dir: '/media',
+  extensions: 'mp4,mkv,srt,ass',
 })
 
 onMounted(() => {
   const initial = props.initialConfig || {}
-  if ('source_dir' in initial) config.source_dir = initial.source_dir || '/mdeia'
-  if ('extensions' in initial) config.extensions = initial.extensions || 'MP4, MKV, SRT, ASS'
+  config.source_dir = initial.source_dir || '/media'
+  config.extensions = initial.extensions || 'mp4,mkv,srt,ass'
 })
 
 function save() {
@@ -60,6 +60,7 @@ function save() {
       extensions: String(config.extensions || '').trim(),
       season: Number((props.initialConfig || {}).season || 1),
       start_episode: Number((props.initialConfig || {}).start_episode || 1),
+      target_episode: Number((props.initialConfig || {}).target_episode || 1),
     })
     toast('配置已保存')
   } finally {
