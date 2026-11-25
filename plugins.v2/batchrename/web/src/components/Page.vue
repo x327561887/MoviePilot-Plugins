@@ -28,8 +28,10 @@
         <div class="br-rule">
           当前目录：<b>{{ sourceLabel }}</b><br>
           改名规则：<b>S{{ pad(season) }}</b>（所有季号统一替换）；
-          以当前 <b>E{{ start }}</b> 为基准，整体平移到 <b>E{{ target }}</b>，即 <b>新集号 = 原集号 +（{{ target }} − {{ start }}）</b>（例：E{{ start }}→E{{ target }}、E{{ start + 1 }}→E{{ target + 1 }}）；
-          <b>「第 XX 集」按新集号自动改写</b>。所有文件均可勾选修改（含已是目标季号的）。
+          <b>起始集号 E{{ start }}</b> 是改名起点（目录中须存在该集，否则全部「不匹配」）；
+          集号 <b>小于 {{ start }}</b> 的文件标记「不匹配」不参与；
+          集号 <b>≥ {{ start }}</b> 的从 <b>E{{ target }}</b> 起累加，即 <b>新集号 = {{ target }} +（原集号 − {{ start }}）</b>（例：E{{ start }}→E{{ target }}、E{{ start + 1 }}→E{{ target + 1 }}）；
+          <b>「第 XX 集」按新集号自动改写</b>。
         </div>
 
         <div class="br-alert error" v-if="error">{{ error }}</div>
@@ -40,6 +42,7 @@
             <span class="br-pill">共 {{ summary.total }} 个媒体文件</span>
             <span class="br-pill">待改名 {{ summary.ready }}</span>
             <span class="br-pill">已存在 {{ summary.exist }}</span>
+            <span class="br-pill">不匹配 {{ summary.unmatched }}</span>
           </div>
           <div class="br-table-wrap">
             <table>
@@ -54,9 +57,9 @@
                 <tr v-for="(item, i) in items" :key="item.old_name">
                   <td><input type="checkbox" class="br-chk" :checked="selected.has(item.old_name)" :disabled="item.status!=='ready'" @change="toggleOne(item.old_name, $event.target.checked)"></td>
                   <td><span class="br-tag" :class="statusClass(item.status)">{{ statusText(item.status) }}</span></td>
-                  <td><span class="br-fname" :class="{ dim: item.status==='exist' }">{{ item.old_name }}</span></td>
+                  <td><span class="br-fname" :class="{ dim: item.status==='exist'||item.status==='unmatched' }">{{ item.old_name }}</span></td>
                   <td><span class="br-arrow">→</span></td>
-                  <td><span class="br-fname new" v-if="item.status==='ready'">{{ item.new_name }}</span><span class="br-fname dim" v-else>已是目标名</span></td>
+                  <td><span class="br-fname new" v-if="item.status==='ready'">{{ item.new_name }}</span><span class="br-fname dim" v-else-if="item.status==='unmatched'">不匹配（不修改）</span><span class="br-fname dim" v-else>已是目标名</span></td>
                 </tr>
                 <tr v-if="items.length===0"><td colspan="5" style="text-align:center;color:#9aa1ad;padding:24px">没有可显示的文件</td></tr>
               </tbody>
@@ -98,7 +101,7 @@ const applying = ref(false)
 const error = ref('')
 const hasPreview = ref(false)
 const items = ref([])
-const summary = reactive({ generated_at: '', total: 0, ready: 0, exist: 0 })
+const summary = reactive({ generated_at: '', total: 0, ready: 0, exist: 0, unmatched: 0 })
 const selected = ref(new Set())
 const canUndo = ref(false)
 const toastText = ref('')
@@ -109,10 +112,10 @@ const selectedReadyCount = computed(() => readyIndexes.value.filter(n => selecte
 
 function pad(value) { return String(value || 0).padStart(2, '0') }
 function statusText(status) {
-  return { ready: '待修改', exist: '已存在', conflict: '跳过', done: '已改名' }[status] || status
+  return { ready: '待修改', exist: '已存在', unmatched: '不匹配', conflict: '跳过', done: '已改名' }[status] || status
 }
 function statusClass(status) {
-  return { ready: 'wait', exist: 'exist', conflict: 'conflict', done: 'done' }[status] || 'wait'
+  return { ready: 'wait', exist: 'exist', unmatched: 'unmatched', conflict: 'conflict', done: 'done' }[status] || 'wait'
 }
 
 function unwrap(response) {
@@ -152,9 +155,11 @@ async function preview() {
     summary.total = Number(data.total_count || 0)
     summary.ready = Number(data.ready_count || 0)
     summary.exist = Number(data.exist_count || 0)
+    summary.unmatched = Number(data.unmatched_count || 0)
     selected.value = new Set(items.value.filter(i => i.status === 'ready').map(i => i.old_name))
     hasPreview.value = true
-    toast(`已扫描到 ${summary.total} 个媒体文件，其中 ${summary.ready} 个待改名`)
+    const extra = data.anchor_exists === false ? '；起始集号在目录中不存在，全部不匹配' : ''
+    toast(`已扫描到 ${summary.total} 个文件，${summary.ready} 个待改名、${summary.unmatched} 个不匹配${extra}`)
   } catch (err) {
     error.value = err?.message || String(err)
     toast(error.value)
@@ -296,6 +301,7 @@ tbody tr:hover{background:#fafbfe}
 .br-tag.wait{background:#fff3e0;color:var(--warn)}
 .br-tag.done{background:#e7f6ed;color:var(--ok)}
 .br-tag.exist{background:#eef1f7;color:#8a90a3}
+.br-tag.unmatched{background:#f0f1f3;color:#a0a5ae;border:1px solid #e2e5ea}
 .br-tag.conflict{background:#fdecec;color:#c0392b}
 .br-bottom-bar{display:flex;align-items:center;justify-content:space-between;margin-top:18px;gap:12px;flex-wrap:wrap}
 .br-selected-count{font-size:14px;color:var(--muted)}

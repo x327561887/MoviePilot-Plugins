@@ -5,15 +5,17 @@
 详情页：目标季号 SXX、起始集号（当前文件集号基准）、修改集数（目标集号）三个输入框；
 点「预览改名」列出文件；勾选要处理的文件后执行批量改名；可一键恢复上次改名。
 
-改名规则：保留原标题，季号统一替换为目标季号；所有识别到集数的文件按原集号整体平移，
-    新集号 = 原集号 + (修改集数 - 起始集号)
-「第 XX 集」自动跟随新集号。示例（目标季号 1、起始集号 1、修改集数 67）：
-    Re：从零开始的异世界生活 - S01E01 - 第 1 集.mkv
-    -> Re：从零开始的异世界生活 - S01E67 - 第 67 集.mkv
-    Re：从零开始的异世界生活 - S01E06 - 第 6 集.mkv
-    -> Re：从零开始的异世界生活 - S01E72 - 第 72 集.mkv
+改名规则：保留原标题，季号统一替换为目标季号；起始集号是改名起点锚点（目录中须存在该集号），
+    集号 < 起始集号 → 标记「不匹配」，不改名、不可勾选；
+    集号 >= 起始集号 → 新集号 = 修改集数 + (原集号 - 起始集号)
+「第 XX 集」自动跟随新集号。示例（目标季号 1、起始集号 68、修改集数 100）：
+    Re：从零开始的异世界生活 - S01E67 - 第 67 集.mkv  -> 不匹配
+    Re：从零开始的异世界生活 - S01E68 - 第 68 集.mkv
+    -> Re：从零开始的异世界生活 - S01E100 - 第 100 集.mkv
+    Re：从零开始的异世界生活 - S01E69 - 第 69 集.mkv
+    -> Re：从零开始的异世界生活 - S01E101 - 第 101 集.mkv
 
-所有识别到集数的文件均可勾选修改（含已是目标季号的）；不覆盖已有文件，执行失败自动回滚。
+若目录中没有集号恰好等于起始集号的文件，则全部标记「不匹配」。不覆盖已有文件，失败自动回滚。
 """
 from __future__ import annotations
 
@@ -38,7 +40,7 @@ class BatchRename(_PluginBase):
     plugin_name = "批量改名"
     plugin_desc = "设置目录后预览文件、勾选批量改名：季号统一替换，集号按起始集/修改集数整体平移，中文集数自动同步。"
     plugin_icon = "https://raw.githubusercontent.com/x327561887/MoviePilot-Plugins/main/plugins.v2/batchrename/icon.png"
-    plugin_version = "1.3.0"
+    plugin_version = "1.4.0"
     plugin_author = "x327561887"
     author_url = "https://github.com/x327561887"
     plugin_config_prefix = "batchrename_"
@@ -186,11 +188,12 @@ class BatchRename(_PluginBase):
             "total_count": plan["total_count"],
             "ready_count": plan["ready_count"],
             "exist_count": sum(1 for i in plan["items"] if i["status"] == "exist"),
+            "unmatched_count": plan["unmatched_count"],
             "skipped": plan["skipped"],
             "conflicts": plan["conflicts"],
             "generated_at": plan["generated_at"],
             "source": plan["source"],
-            "offset": plan["offset"],
+            "anchor_exists": plan["anchor_exists"],
         })
 
     def api_apply(self, payload: Optional[dict] = Body(default=None)) -> Dict[str, Any]:
@@ -316,7 +319,13 @@ class BatchRename(_PluginBase):
         return season, start, target
 
     def _build_plan(self, season: int, start: int, target: int) -> Dict[str, Any]:
-        """扫描目录并生成改名清单。新集号 = 原集号 + (修改集数 - 起始集号)。"""
+        """扫描目录并生成改名清单。
+
+        起始集号是「改名起点锚点」，必须在目录文件里存在：
+        - 集号 < 起始集号 → 标记「不匹配」，不改名、不可勾选；
+        - 集号 >= 起始集号 → 新集号 = 修改集数 + (原集号 - 起始集号)。
+        若目录中没有集号恰好等于起始集号的文件，则全部标记「不匹配」。
+        """
         source = self._resolve_source()
         files, ignored = self._collect_files(source)
         if not files:
@@ -336,27 +345,36 @@ class BatchRename(_PluginBase):
         if not parsed:
             raise ValueError("文件名中没有识别到 SxxExx 或「第xx集」")
 
-        # 整体平移：以「起始集号」对应当前命名集号，「修改集数」为目标集号
-        offset = target - start
+        # 锚点校验：目录中必须存在集号恰好等于起始集号的文件
+        episodes = {entry[2] for entry in parsed}
+        anchor_exists = start in episodes
         season_str = str(season).zfill(2)
         items: List[dict] = []
         conflicts: List[str] = []
         target_names: Dict[str, str] = {}
         for path, title, old_episode, old_season in parsed:
             src = path.resolve()
-            new_episode = max(1, old_episode + offset)
-            stem = self._safe_stem(
-                f"{title} - S{season_str}E{str(new_episode).zfill(2)} - 第 {new_episode} 集"
-            )
-            dst = src.with_name(f"{stem}{src.suffix}")
-            # 只有改名后文件名完全不变的文件才标为「已存在」且不可勾选；
-            # 其余文件（含已是目标季号的）均可勾选修改。
-            if src == dst:
-                status = "exist"
-                reason = "已是目标文件名，无需改动"
+            # 不匹配的两种情况：锚点不存在，或当前文件集号小于起始集号
+            if not anchor_exists or old_episode < start:
+                new_episode = old_episode
+                dst = src
+                status = "unmatched"
+                reason = ("目录中无 E" + str(start).zfill(2) + "，起始集号不匹配"
+                          if not anchor_exists else f"集数小于起始集号 {start}，不匹配")
             else:
-                status = "ready"
-                reason = ""
+                new_episode = max(1, target + (old_episode - start))
+                stem = self._safe_stem(
+                    f"{title} - S{season_str}E{str(new_episode).zfill(2)} - 第 {new_episode} 集"
+                )
+                dst = src.with_name(f"{stem}{src.suffix}")
+                # 只有改名后文件名完全不变的文件才标为「已存在」且不可勾选；
+                # 其余文件（含已是目标季号的）均可勾选修改。
+                if src == dst:
+                    status = "exist"
+                    reason = "已是目标文件名，无需改动"
+                else:
+                    status = "ready"
+                    reason = ""
             record = {
                 "src": str(src), "dst": str(dst),
                 "old_name": src.name, "new_name": dst.name,
@@ -386,9 +404,10 @@ class BatchRename(_PluginBase):
             "items": items,
             "total_count": len(items),
             "ready_count": sum(1 for item in items if item["status"] == "ready"),
+            "unmatched_count": sum(1 for item in items if item["status"] == "unmatched"),
             "skipped": ignored,
             "conflicts": conflicts,
-            "offset": offset,
+            "anchor_exists": anchor_exists,
         }
 
     def _resolve_source(self) -> Path:

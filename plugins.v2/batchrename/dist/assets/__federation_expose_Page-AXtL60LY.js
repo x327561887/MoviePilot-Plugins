@@ -1,0 +1,428 @@
+import { importShared } from './__federation_fn_import-JrT3xvdd.js';
+import { _ as _export_sfc } from './_plugin-vue_export-helper-pcqpp-6-.js';
+
+const {createElementVNode:_createElementVNode,vModelText:_vModelText,withDirectives:_withDirectives,toDisplayString:_toDisplayString,createTextVNode:_createTextVNode,openBlock:_openBlock,createElementBlock:_createElementBlock,createCommentVNode:_createCommentVNode,renderList:_renderList,Fragment:_Fragment,normalizeClass:_normalizeClass} = await importShared('vue');
+
+
+const _hoisted_1 = { class: "br-page" };
+const _hoisted_2 = { class: "br-card" };
+const _hoisted_3 = { class: "br-head" };
+const _hoisted_4 = { class: "br-body" };
+const _hoisted_5 = { class: "br-toolbar" };
+const _hoisted_6 = { class: "br-param" };
+const _hoisted_7 = { class: "br-param" };
+const _hoisted_8 = { class: "br-param" };
+const _hoisted_9 = ["disabled"];
+const _hoisted_10 = { class: "br-rule" };
+const _hoisted_11 = {
+  key: 0,
+  class: "br-alert error"
+};
+const _hoisted_12 = { key: 1 };
+const _hoisted_13 = { class: "br-summary" };
+const _hoisted_14 = { class: "br-pill" };
+const _hoisted_15 = { class: "br-pill" };
+const _hoisted_16 = { class: "br-pill" };
+const _hoisted_17 = { class: "br-pill" };
+const _hoisted_18 = { class: "br-pill" };
+const _hoisted_19 = { class: "br-table-wrap" };
+const _hoisted_20 = { style: {"width":"46px"} };
+const _hoisted_21 = ["checked", "disabled"];
+const _hoisted_22 = ["checked", "disabled", "onChange"];
+const _hoisted_23 = {
+  key: 0,
+  class: "br-fname new"
+};
+const _hoisted_24 = {
+  key: 1,
+  class: "br-fname dim"
+};
+const _hoisted_25 = {
+  key: 2,
+  class: "br-fname dim"
+};
+const _hoisted_26 = { key: 0 };
+const _hoisted_27 = { class: "br-bottom-bar" };
+const _hoisted_28 = { class: "br-selected-count" };
+const _hoisted_29 = { class: "br-btn-group" };
+const _hoisted_30 = ["disabled"];
+const _hoisted_31 = ["disabled"];
+
+const {computed,onMounted,reactive,ref} = await importShared('vue');
+
+
+
+const _sfc_main = {
+  __name: 'Page',
+  props: {
+  model: { type: Object, default: () => ({}) },
+  api: { type: Object, default: () => ({}) },
+  pluginId: { type: String, default: 'BatchRename' },
+},
+  emits: ['close', 'switch'],
+  setup(__props, { emit: __emit }) {
+
+const props = __props;
+const emit = __emit;
+
+const season = ref(Number((props.model || {}).season || 1));
+const start = ref(Number((props.model || {}).start_episode || 1));
+const target = ref(Number((props.model || {}).target_episode || 1));
+const sourceLabel = ref((props.model || {}).source_dir || '');
+
+const loading = ref(false);
+const applying = ref(false);
+const error = ref('');
+const hasPreview = ref(false);
+const items = ref([]);
+const summary = reactive({ generated_at: '', total: 0, ready: 0, exist: 0, unmatched: 0 });
+const selected = ref(new Set());
+const canUndo = ref(false);
+const toastText = ref('');
+
+const readyIndexes = computed(() => items.value.filter(i => i.status === 'ready').map(i => i.old_name));
+const allChecked = computed(() => readyIndexes.value.length > 0 && readyIndexes.value.every(n => selected.value.has(n)));
+const selectedReadyCount = computed(() => readyIndexes.value.filter(n => selected.value.has(n)).length);
+
+function pad(value) { return String(value || 0).padStart(2, '0') }
+function statusText(status) {
+  return { ready: '待修改', exist: '已存在', unmatched: '不匹配', conflict: '跳过', done: '已改名' }[status] || status
+}
+function statusClass(status) {
+  return { ready: 'wait', exist: 'exist', unmatched: 'unmatched', conflict: 'conflict', done: 'done' }[status] || 'wait'
+}
+
+function unwrap(response) {
+  if (!response || typeof response !== 'object') return response
+  if ('success' in response && 'data' in response) {
+    if (!response.success) throw new Error(response.message || '请求失败')
+    return response.data
+  }
+  return response
+}
+
+async function callApi(path, method = 'get', payload) {
+  const api = props.api || {};
+  if (method === 'get') {
+    if (typeof api.get === 'function') return unwrap(await api.get(path, payload))
+    if (typeof api.request === 'function') return unwrap(await api.request({ url: path, method: 'get', params: payload }))
+  } else {
+    if (typeof api.post === 'function') return unwrap(await api.post(path, payload))
+    if (typeof api.request === 'function') return unwrap(await api.request({ url: path, method: 'post', data: payload }))
+  }
+  throw new Error('主应用未注入 API 客户端，请确认插件已启用')
+}
+
+const apiPrefix = computed(() => `plugin/${props.pluginId || 'BatchRename'}`);
+
+async function preview() {
+  loading.value = true;
+  error.value = '';
+  try {
+    const data = await callApi(`${apiPrefix.value}/preview`, 'post', {
+      season: Number(season.value) || 0,
+      start: Number(start.value) || 1,
+      target: Number(target.value) || 1,
+    });
+    items.value = data.items || [];
+    summary.generated_at = data.generated_at || '';
+    summary.total = Number(data.total_count || 0);
+    summary.ready = Number(data.ready_count || 0);
+    summary.exist = Number(data.exist_count || 0);
+    summary.unmatched = Number(data.unmatched_count || 0);
+    selected.value = new Set(items.value.filter(i => i.status === 'ready').map(i => i.old_name));
+    hasPreview.value = true;
+    const extra = data.anchor_exists === false ? '；起始集号在目录中不存在，全部不匹配' : '';
+    toast(`已扫描到 ${summary.total} 个文件，${summary.ready} 个待改名、${summary.unmatched} 个不匹配${extra}`);
+  } catch (err) {
+    error.value = err?.message || String(err);
+    toast(error.value);
+  } finally {
+    loading.value = false;
+  }
+}
+
+let previewTimer;
+function refreshPreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => { if (hasPreview.value) preview(); }, 350);
+}
+
+function toggleAll(on) {
+  const next = new Set(selected.value);
+  readyIndexes.value.forEach(name => { if (on) next.add(name); else next.delete(name); });
+  selected.value = next;
+}
+function toggleOne(name, on) {
+  const next = new Set(selected.value);
+  if (on) next.add(name); else next.delete(name);
+  selected.value = next;
+}
+
+async function apply() {
+  const names = readyIndexes.value.filter(n => selected.value.has(n));
+  if (!names.length) return
+  applying.value = true;
+  error.value = '';
+  try {
+    const data = await callApi(`${apiPrefix.value}/apply`, 'post', {
+      season: Number(season.value) || 0,
+      start: Number(start.value) || 1,
+      target: Number(target.value) || 1,
+      names,
+    });
+    toast(data?.message || `已完成批量改名，共处理 ${names.length} 个文件`);
+    canUndo.value = true;
+    await preview();
+  } catch (err) {
+    error.value = err?.message || String(err);
+    toast(error.value);
+  } finally {
+    applying.value = false;
+  }
+}
+
+async function undo() {
+  applying.value = true;
+  error.value = '';
+  try {
+    const data = await callApi(`${apiPrefix.value}/undo`, 'post', {});
+    toast(data?.message || '已恢复上次改名');
+    canUndo.value = false;
+    await preview();
+  } catch (err) {
+    error.value = err?.message || String(err);
+    toast(error.value);
+  } finally {
+    applying.value = false;
+  }
+}
+
+onMounted(async () => {
+  // 主程序通过 api 注入插件客户端；拉取配置以填充输入框与当前目录显示。
+  // 详情页不自动扫描：用户点「预览改名」后再列出文件，与原原型一致。
+  try {
+    const cfg = await callApi(`${apiPrefix.value}/config`, 'get');
+    if (cfg) {
+      if (cfg.season != null) season.value = Number(cfg.season);
+      if (cfg.start_episode != null) start.value = Number(cfg.start_episode);
+      if (cfg.target_episode != null) target.value = Number(cfg.target_episode);
+      if (cfg.source_dir) sourceLabel.value = cfg.source_dir;
+    }
+  } catch (err) {
+    // 拉取失败不影响手动输入
+  }
+});
+
+let toastTimer;
+function toast(message) {
+  toastText.value = message;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastText.value = ''; }, 2800);
+}
+
+return (_ctx, _cache) => {
+  return (_openBlock(), _createElementBlock("div", _hoisted_1, [
+    _createElementVNode("div", _hoisted_2, [
+      _createElementVNode("div", _hoisted_3, [
+        _cache[6] || (_cache[6] = _createElementVNode("h1", null, "批量改名 - 插件详情", -1)),
+        _createElementVNode("span", {
+          class: "br-close",
+          onClick: _cache[0] || (_cache[0] = $event => (emit('close')))
+        }, "✕")
+      ]),
+      _createElementVNode("div", _hoisted_4, [
+        _createElementVNode("div", _hoisted_5, [
+          _createElementVNode("div", _hoisted_6, [
+            _cache[7] || (_cache[7] = _createElementVNode("label", null, "目标季号 SXX", -1)),
+            _withDirectives(_createElementVNode("input", {
+              type: "number",
+              "onUpdate:modelValue": _cache[1] || (_cache[1] = $event => ((season).value = $event)),
+              min: "0",
+              max: "99",
+              onInput: refreshPreview
+            }, null, 544), [
+              [
+                _vModelText,
+                season.value,
+                void 0,
+                { number: true }
+              ]
+            ])
+          ]),
+          _createElementVNode("div", _hoisted_7, [
+            _cache[8] || (_cache[8] = _createElementVNode("label", null, "起始集号（当前）", -1)),
+            _withDirectives(_createElementVNode("input", {
+              type: "number",
+              "onUpdate:modelValue": _cache[2] || (_cache[2] = $event => ((start).value = $event)),
+              min: "1",
+              max: "9999",
+              onInput: refreshPreview
+            }, null, 544), [
+              [
+                _vModelText,
+                start.value,
+                void 0,
+                { number: true }
+              ]
+            ])
+          ]),
+          _createElementVNode("div", _hoisted_8, [
+            _cache[9] || (_cache[9] = _createElementVNode("label", null, "修改集数（目标）", -1)),
+            _withDirectives(_createElementVNode("input", {
+              type: "number",
+              "onUpdate:modelValue": _cache[3] || (_cache[3] = $event => ((target).value = $event)),
+              min: "1",
+              max: "9999",
+              onInput: refreshPreview
+            }, null, 544), [
+              [
+                _vModelText,
+                target.value,
+                void 0,
+                { number: true }
+              ]
+            ])
+          ]),
+          _createElementVNode("button", {
+            class: "br-btn primary",
+            disabled: loading.value,
+            onClick: preview
+          }, " 🔍 " + _toDisplayString(loading.value ? '扫描中…' : '预览改名'), 9, _hoisted_9),
+          _createElementVNode("button", {
+            class: "br-btn ghost",
+            onClick: _cache[4] || (_cache[4] = $event => (emit('switch')))
+          }, "⚙ 修改目录设置")
+        ]),
+        _createElementVNode("div", _hoisted_10, [
+          _cache[10] || (_cache[10] = _createTextVNode(" 当前目录：", -1)),
+          _createElementVNode("b", null, _toDisplayString(sourceLabel.value), 1),
+          _cache[11] || (_cache[11] = _createElementVNode("br", null, null, -1)),
+          _cache[12] || (_cache[12] = _createTextVNode(" 改名规则：", -1)),
+          _createElementVNode("b", null, "S" + _toDisplayString(pad(season.value)), 1),
+          _cache[13] || (_cache[13] = _createTextVNode("（所有季号统一替换）； ", -1)),
+          _createElementVNode("b", null, "起始集号 E" + _toDisplayString(start.value), 1),
+          _cache[14] || (_cache[14] = _createTextVNode(" 是改名起点（目录中须存在该集，否则全部「不匹配」）； 集号 ", -1)),
+          _createElementVNode("b", null, "小于 " + _toDisplayString(start.value), 1),
+          _cache[15] || (_cache[15] = _createTextVNode(" 的文件标记「不匹配」不参与； 集号 ", -1)),
+          _createElementVNode("b", null, "≥ " + _toDisplayString(start.value), 1),
+          _cache[16] || (_cache[16] = _createTextVNode(" 的从 ", -1)),
+          _createElementVNode("b", null, "E" + _toDisplayString(target.value), 1),
+          _cache[17] || (_cache[17] = _createTextVNode(" 起累加，即 ", -1)),
+          _createElementVNode("b", null, "新集号 = " + _toDisplayString(target.value) + " +（原集号 − " + _toDisplayString(start.value) + "）", 1),
+          _createTextVNode("（例：E" + _toDisplayString(start.value) + "→E" + _toDisplayString(target.value) + "、E" + _toDisplayString(start.value + 1) + "→E" + _toDisplayString(target.value + 1) + "）； ", 1),
+          _cache[18] || (_cache[18] = _createElementVNode("b", null, "「第 XX 集」按新集号自动改写", -1)),
+          _cache[19] || (_cache[19] = _createTextVNode("。 ", -1))
+        ]),
+        (error.value)
+          ? (_openBlock(), _createElementBlock("div", _hoisted_11, _toDisplayString(error.value), 1))
+          : _createCommentVNode("", true),
+        (hasPreview.value)
+          ? (_openBlock(), _createElementBlock("div", _hoisted_12, [
+              _createElementVNode("div", _hoisted_13, [
+                _createElementVNode("span", _hoisted_14, _toDisplayString(summary.generated_at), 1),
+                _createElementVNode("span", _hoisted_15, "共 " + _toDisplayString(summary.total) + " 个媒体文件", 1),
+                _createElementVNode("span", _hoisted_16, "待改名 " + _toDisplayString(summary.ready), 1),
+                _createElementVNode("span", _hoisted_17, "已存在 " + _toDisplayString(summary.exist), 1),
+                _createElementVNode("span", _hoisted_18, "不匹配 " + _toDisplayString(summary.unmatched), 1)
+              ]),
+              _createElementVNode("div", _hoisted_19, [
+                _createElementVNode("table", null, [
+                  _createElementVNode("thead", null, [
+                    _createElementVNode("tr", null, [
+                      _createElementVNode("th", _hoisted_20, [
+                        _createElementVNode("input", {
+                          type: "checkbox",
+                          class: "br-chk",
+                          checked: allChecked.value,
+                          disabled: readyIndexes.value.length===0,
+                          onChange: _cache[5] || (_cache[5] = $event => (toggleAll($event.target.checked)))
+                        }, null, 40, _hoisted_21)
+                      ]),
+                      _cache[20] || (_cache[20] = _createElementVNode("th", { style: {"width":"96px"} }, "状态", -1)),
+                      _cache[21] || (_cache[21] = _createElementVNode("th", null, "原文件名", -1)),
+                      _cache[22] || (_cache[22] = _createElementVNode("th", { style: {"width":"30px"} }, null, -1)),
+                      _cache[23] || (_cache[23] = _createElementVNode("th", null, "修改后文件名", -1))
+                    ])
+                  ]),
+                  _createElementVNode("tbody", null, [
+                    (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(items.value, (item, i) => {
+                      return (_openBlock(), _createElementBlock("tr", {
+                        key: item.old_name
+                      }, [
+                        _createElementVNode("td", null, [
+                          _createElementVNode("input", {
+                            type: "checkbox",
+                            class: "br-chk",
+                            checked: selected.value.has(item.old_name),
+                            disabled: item.status!=='ready',
+                            onChange: $event => (toggleOne(item.old_name, $event.target.checked))
+                          }, null, 40, _hoisted_22)
+                        ]),
+                        _createElementVNode("td", null, [
+                          _createElementVNode("span", {
+                            class: _normalizeClass(["br-tag", statusClass(item.status)])
+                          }, _toDisplayString(statusText(item.status)), 3)
+                        ]),
+                        _createElementVNode("td", null, [
+                          _createElementVNode("span", {
+                            class: _normalizeClass(["br-fname", { dim: item.status==='exist'||item.status==='unmatched' }])
+                          }, _toDisplayString(item.old_name), 3)
+                        ]),
+                        _cache[24] || (_cache[24] = _createElementVNode("td", null, [
+                          _createElementVNode("span", { class: "br-arrow" }, "→")
+                        ], -1)),
+                        _createElementVNode("td", null, [
+                          (item.status==='ready')
+                            ? (_openBlock(), _createElementBlock("span", _hoisted_23, _toDisplayString(item.new_name), 1))
+                            : (item.status==='unmatched')
+                              ? (_openBlock(), _createElementBlock("span", _hoisted_24, "不匹配（不修改）"))
+                              : (_openBlock(), _createElementBlock("span", _hoisted_25, "已是目标名"))
+                        ])
+                      ]))
+                    }), 128)),
+                    (items.value.length===0)
+                      ? (_openBlock(), _createElementBlock("tr", _hoisted_26, [...(_cache[25] || (_cache[25] = [
+                          _createElementVNode("td", {
+                            colspan: "5",
+                            style: {"text-align":"center","color":"#9aa1ad","padding":"24px"}
+                          }, "没有可显示的文件", -1)
+                        ]))]))
+                      : _createCommentVNode("", true)
+                  ])
+                ])
+              ]),
+              _createElementVNode("div", _hoisted_27, [
+                _createElementVNode("div", _hoisted_28, [
+                  _cache[26] || (_cache[26] = _createTextVNode("已选择 ", -1)),
+                  _createElementVNode("b", null, _toDisplayString(selectedReadyCount.value), 1),
+                  _cache[27] || (_cache[27] = _createTextVNode(" 个文件", -1))
+                ]),
+                _createElementVNode("div", _hoisted_29, [
+                  _createElementVNode("button", {
+                    class: "br-btn ghost",
+                    disabled: !canUndo.value,
+                    onClick: undo
+                  }, "↩ 恢复上次改名", 8, _hoisted_30),
+                  _createElementVNode("button", {
+                    class: "br-btn go",
+                    disabled: selectedReadyCount.value===0 || applying.value,
+                    onClick: apply
+                  }, " ✓ " + _toDisplayString(applying.value ? '执行中…' : '执行批量改名'), 9, _hoisted_31)
+                ])
+              ])
+            ]))
+          : _createCommentVNode("", true)
+      ])
+    ]),
+    _createElementVNode("div", {
+      class: _normalizeClass(["br-toast", { show: toastText.value }])
+    }, _toDisplayString(toastText.value), 3)
+  ]))
+}
+}
+
+};
+const Page = /*#__PURE__*/_export_sfc(_sfc_main, [['__scopeId',"data-v-e2942e7a"]]);
+
+export { Page as default };
