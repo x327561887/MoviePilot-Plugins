@@ -23,7 +23,8 @@ https://github.com/x327561887/MoviePilot-Plugins
 ├── icons/                   # 插件图标
 ├── plugins.v2/              # V2 插件源码目录
 │   ├── transferwall/        # 整理海报墙
-│   └── hostsurl/            # 远程 Hosts
+│   ├── hostsurl/            # 远程 Hosts
+│   └── batchrename/         # 批量改名（顺序重编号）
 └── README.md
 ```
 
@@ -37,6 +38,7 @@ MoviePilot 安装时会读取根目录 `package.v2.json`，再从 `plugins.v2/<�
 | --- | --- | --- |
 | `TransferWall` | 整理海报墙 | 在「整理」分组显示转移记录海报墙，支持删除整理记录、源文件、媒体库文件 |
 | `HostsUrl` | 远程Hosts | 定时从远程 URL 拉取 hosts 规则并写入系统，支持手动更新 |
+| `BatchRename` | 批量改名（顺序重编号） | 固定标题与季号，按原集数排序后从指定起始集连续递增，支持预览与回滚 |
 
 ## TransferWall（整理海报墙）
 
@@ -65,6 +67,21 @@ npm run build
 ```
 
 构建后删除 `index.html`、`index-*.js` 和 `__federation_shared_vuetify/`，只保留 `remoteEntry.js`、`__federation_*.js/.css`、`_plugin-vue_export-helper-*.js`。
+
+## BatchRename（批量改名）
+
+- 固定标题与季号，按原集数从小到大排序，从指定起始集连续递增改名。
+- 同一原集数的视频与字幕共用一个新集号；识别不到集数的文件跳过。
+- 默认模板：`{title} - S{season}E{episode} - 第 {episode_cn} 集`；支持 `{old_episode}` 便于排查。
+- 不覆盖已存在的目标文件；执行失败自动回滚；详情页可一键恢复上次改名。
+
+API 前缀：`/api/v1/plugin/BatchRename`
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/preview` | 预览改名清单，不修改文件 |
+| POST | `/apply` | 按预览清单执行改名 |
+| POST | `/undo` | 恢复上次改名 |
 
 ## 注意事项
 

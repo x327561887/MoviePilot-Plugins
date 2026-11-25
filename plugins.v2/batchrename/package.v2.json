@@ -1,0 +1,16 @@
+{
+  "BatchRename": {
+    "name": "批量改名（顺序重编号）",
+    "description": "固定统一名称与季号，按原集数排序后从指定起始集连续递增，支持预览与回滚。",
+    "labels": "整理,批量改名,文件重命名",
+    "version": "1.0.0",
+    "icon": "Moviepilot_A.png",
+    "author": "x327561887",
+    "level": 1,
+    "v3": false,
+    "release": false,
+    "history": {
+      "v1.0.0": "初始版本：固定模板顺序重编号、预览、执行、失败回滚与一键恢复。"
+    }
+  }
+}
