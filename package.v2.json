@@ -15,20 +15,6 @@
       "v1.0.0": "初始版本：整理记录聚合海报墙，支持记录/源文件/媒体库文件删除；按季分类与勾选批量删除；亮绿色勾选框；自定义 LOGO"
     }
   },
-  "HostsUrl": {
-    "name": "远程Hosts",
-    "description": "定时从远程URL拉取hosts并写入系统，支持手动更新。",
-    "labels": "工具,网络",
-    "version": "1.0.0",
-    "icon": "https://raw.githubusercontent.com/x327561887/MoviePilot-Plugins/main/plugins/v2/HostsUrl/hosts.png",
-    "author": "x327561887",
-    "level": 1,
-    "v3": false,
-    "release": false,
-    "history": {
-      "v1.0.0": "初始版本"
-    }
-  },
   "BatchRename": {
     "name": "批量改名",
     "description": "配置页填目录与扩展名；详情页起始集作为改名锚点，小于它的文件标记不匹配，其余从修改集数起累加，勾选后批量改名。",
